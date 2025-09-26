@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 SpeakStudio (Streamlit)
-- Modes: Daily Chat / Shadowing / Roleplay (beta)
+- Modes: Daily Chat / Shadowing / Roleplay
 - Windows 11 + Python 3.10-3.12
 
 Required packages (PowerShell):
@@ -31,7 +31,7 @@ import streamlit.components.v1 as components
 # LLM 呼び出しは api_client に委譲（キー取得は utils 内部で自動解決）
 from api_client import chat as llm_chat
 
-APP_VERSION = "2025-09-26_23"
+APP_VERSION = "2025-09-26_23b"
 
 # ===== Optional: mic recorder =====
 try:
@@ -312,7 +312,8 @@ st.markdown(CSS_BLOCK, unsafe_allow_html=True)
 st.header("SpeakStudio")
 st.caption("Version: " + APP_VERSION)
 
-mode = st.radio("モードを選択", ("日常英会話", "シャドーイング", "ロールプレイ（β）"), index=0)
+# ★（β）を外したラジオ項目
+mode = st.radio("モードを選択", ("日常英会話", "シャドーイング", "ロールプレイ"), index=0)
 
 
 # Helper for option formatting
@@ -557,10 +558,10 @@ elif mode == "シャドーイング":
 
 
 # ==============================
-# 3) Roleplay (beta)
+# 3) Roleplay
 # ==============================
 else:
-    st.subheader("ロールプレイ（β）")
+    st.subheader("ロールプレイ")
     st.caption("※ OpenAI キーがない場合は簡易ローカル応答（音声なし）")
 
     scenarios = {
@@ -623,7 +624,7 @@ else:
         st.session_state[key_name].append({"role": "assistant", "content": reply})
 
 # 共通フッター
-st.caption("© 2025 SpeakStudio — Daily Chat + Shadowing + Roleplay (β)")
+st.caption("© 2025 SpeakStudio — Daily Chat + Shadowing + Roleplay")
 
 # 日常英会話以外では通常フッター位置に表示
 if mode != "日常英会話":
