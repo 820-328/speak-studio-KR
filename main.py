@@ -31,7 +31,7 @@ import streamlit.components.v1 as components
 # LLM 呼び出しは api_client に委譲（キー取得は utils 内部で自動解決）
 from api_client import chat as llm_chat
 
-APP_VERSION = "2025-09-26_20"
+APP_VERSION = "2025-09-26_21"
 
 # ===== Optional: mic recorder =====
 try:
@@ -101,20 +101,12 @@ def extract_english_for_tts(full_text: str, max_len: int = 600) -> str:
     """
     if not full_text:
         return ""
-
-    # 優先: 行頭にある JP マーカー
     m = re.search(r'(?im)^\s*jp\s*[:：]', full_text)
     cut = m.start() if m else None
-
-    # 次点: 行内に出てくる JP マーカー
     if cut is None:
         m2 = re.search(r'(?i)\bjp\s*[:：]', full_text)
         cut = m2.start() if m2 else len(full_text)
-
-    eng = full_text[:cut].strip()
-    if not eng:
-        eng = full_text.strip()
-
+    eng = (full_text[:cut].strip() or full_text.strip())
     return eng[:max_len]
 
 
@@ -307,7 +299,6 @@ CSS_BLOCK = "\n".join(
         "</style>",
     ]
 )
-
 st.markdown(CSS_BLOCK, unsafe_allow_html=True)
 
 st.title("英会話アプリ")
@@ -323,54 +314,76 @@ def format_sentence_option(sid: str, id_to_sent: Dict[str, ShadowSentence]) -> s
 
 
 # -------------------------------------------------
-# モバイル対応：HTML内のボタンで確実に再生（同一ユーザー操作内で play）
+# モバイル対応：WebAudioで再生（必要に応じて音量ブースト）
 # -------------------------------------------------
-def render_inline_play_button(mp3_bytes: bytes | None, label: str = "▶ お手本を再生") -> None:
+def render_inline_play_button(mp3_bytes: bytes | None, label: str = "🔊 再生", boost: float = 1.0) -> None:
     """
-    iOS/Android の自動再生制限に対応するため、
-    HTMLコンポーネント内にボタンと <audio> を同居させ、
-    そのクリックイベント内で play() を呼ぶ。
+    iOS/Android の制限を回避するため、ユーザーのクリック内で
+    AudioContext.decodeAudioData → GainNode で再生。boost>1 で増幅。
     """
     if not mp3_bytes:
-        st.markdown("<div class='warn'>お手本音声の生成に失敗しました。</div>", unsafe_allow_html=True)
+        st.markdown("<div class='warn'>音声の生成に失敗しました。</div>", unsafe_allow_html=True)
         return
 
     b64 = base64.b64encode(mp3_bytes).decode("ascii")
+    # 注意: iOS Safari ではユーザー操作内での AudioContext.resume() が必要
     components.html(
         f"""
         <div style="display:flex;gap:8px;align-items:center;">
-          <button id="demoPlayBtn" style="
+          <button id="playBtn" style="
               background:#0b5cff;color:#fff;border:none;border-radius:8px;
-              padding:8px 14px;cursor:pointer;font-size:14px;">
-            {label}
-          </button>
-          <span id="demoHint" style="font-size:12px;color:#6b7280;"></span>
-          <audio id="demoAudio" preload="auto" playsinline>
-            <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
-          </audio>
+              padding:8px 14px;cursor:pointer;font-size:14px;">{label}</button>
+          <span id="hint" style="font-size:12px;color:#6b7280;"></span>
         </div>
         <script>
-          const btn = document.getElementById('demoPlayBtn');
-          const aud = document.getElementById('demoAudio');
-          const hint = document.getElementById('demoHint');
-          function playOnce() {{
+        (function(){{
+          const b64 = "{b64}";
+          const boost = {boost if boost>0 else 1.0};
+          let audioCtx;
+          let playingSource;
+
+          function base64ToArrayBuffer(b64) {{
+            const binary_string = atob(b64);
+            const len = binary_string.length;
+            const bytes = new Uint8Array(len);
+            for (let i=0; i<len; i++) bytes[i] = binary_string.charCodeAt(i);
+            return bytes.buffer;
+          }}
+
+          async function playOnce() {{
             try {{
-              aud.pause();
-              aud.currentTime = 0;
-              const p = aud.play();
-              if (p) {{
-                p.then(() => {{ hint.textContent = ""; }}).catch(() => {{
-                  hint.textContent = "再生がブロックされました。端末のサイレント解除や音量を確認してください。";
-                }});
+              if (!audioCtx) {{
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
               }}
+              if (audioCtx.state === "suspended") {{
+                await audioCtx.resume();
+              }}
+              const ab = base64ToArrayBuffer(b64);
+              const buf = await audioCtx.decodeAudioData(ab.slice(0));
+              if (playingSource) {{
+                try {{ playingSource.stop(); }} catch(_e) {{}}
+              }}
+              const src = audioCtx.createBufferSource();
+              src.buffer = buf;
+
+              const gainNode = audioCtx.createGain();
+              gainNode.gain.value = Math.max(0.01, boost); // 1.0=等倍, >1で増幅
+
+              src.connect(gainNode).connect(audioCtx.destination);
+              src.start(0);
+              playingSource = src;
+              document.getElementById("hint").textContent = "";
             }} catch(e) {{
-              hint.textContent = "再生できませんでした。";
+              console.error(e);
+              document.getElementById("hint").textContent = "再生できませんでした。端末のサイレント解除・音量をご確認ください。";
             }}
           }}
-          btn.addEventListener('click', playOnce);
+
+          document.getElementById("playBtn").addEventListener("click", playOnce);
+        }})();
         </script>
         """,
-        height=50,
+        height=48,
         scrolling=False,
     )
 
@@ -414,13 +427,10 @@ if mode == "日常英会話":
                     reply = local_fallback_reply(st.session_state.daily_messages)
             st.markdown(reply)
 
-            # === 返答の英語部分のみをTTSで読み上げ（JP: 以降は除外） ===
+            # 英語部分のみTTS → モバイルでも確実に鳴るボタンで再生（少しブースト）
             eng = extract_english_for_tts(reply)
             mp3 = tts_cached(eng, lang="en")
-            if mp3:
-                st.audio(mp3, format="audio/mp3")
-            else:
-                st.caption("（音声生成に失敗：ネットワークまたは gTTS の状態をご確認ください）")
+            render_inline_play_button(mp3, label="🔊 英語の返答を再生", boost=1.4)
 
         st.session_state.daily_messages.append({"role": "assistant", "content": reply})
 
@@ -463,12 +473,12 @@ elif mode == "シャドーイング":
             st.write(target.text_ja)
             st.caption(target.hint)
 
-    # === お手本音声を事前生成（選択した文に対して一度だけ） ===
+    # お手本音声（TTS キャッシュ）
     demo_mp3 = tts_cached(target.text_en, lang="en")
 
-    # === お手本の発音：モバイルでも確実に鳴るインラインボタン ===
+    # モバイルでも確実 & 音量ブースト（1.8倍）
     st.markdown("#### お手本の発音")
-    render_inline_play_button(demo_mp3, label="▶ お手本を再生")
+    render_inline_play_button(demo_mp3, label="▶ お手本を再生", boost=1.8)
 
     st.divider()
 
@@ -512,7 +522,7 @@ elif mode == "シャドーイング":
             st.write(recognized)
 
             score = similarity_score(target.text_en, recognized)
-            st.markdown("#### 类似度スコア: **" + f"{score*100:.1f}%" + "**")
+            st.markdown("#### 類似度スコア: **" + f"{score*100:.1f}%" + "**")
 
             st.markdown("#### 差分 (緑=追加/置換, 赤=不足)")
             html = diff_html(target.text_en, recognized)
@@ -595,13 +605,10 @@ else:
                     reply = local_fallback_reply(st.session_state[key_name])
             st.markdown(reply)
 
-            # === 返答の英語部分のみをTTSで読み上げ ===
+            # 英語部分のみTTS → モバイル確実再生（少しブースト）
             eng = extract_english_for_tts(reply)
             mp3 = tts_cached(eng, lang="en")
-            if mp3:
-                st.audio(mp3, format="audio/mp3")
-            else:
-                st.caption("（音声生成に失敗：ネットワークまたは gTTS の状態をご確認ください）")
+            render_inline_play_button(mp3, label="🔊 英語の返答を再生", boost=1.4)
 
         st.session_state[key_name].append({"role": "assistant", "content": reply})
 
