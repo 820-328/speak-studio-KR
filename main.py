@@ -17,6 +17,8 @@ Notes:
 from __future__ import annotations
 
 import io
+import os
+import sqlite3
 from dataclasses import dataclass
 from difflib import SequenceMatcher, ndiff
 from typing import Any, Dict, List, Tuple
@@ -112,6 +114,74 @@ def diff_html(ref: str, hyp: str) -> str:
         else:
             out.append(token[2:])
     return " ".join(out)
+
+
+# ==============================
+# Access Counter (SQLite)
+# ==============================
+DB_DIR = "data"
+DB_PATH = os.path.join(DB_DIR, "counter.db")
+
+def _init_counter_db() -> None:
+    """カウンタ用DBの初期化（存在しなければ作成）"""
+    os.makedirs(DB_DIR, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)  # autocommit
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS counters (
+                name TEXT PRIMARY KEY,
+                value INTEGER NOT NULL
+            );
+            """
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO counters(name, value) VALUES(?, ?);",
+            ("page_views", 0),
+        )
+    finally:
+        conn.close()
+
+def increment_and_get_page_views() -> int:
+    """同一ブラウザの1セッション中は1度だけ加算し、累計を返す"""
+    if "view_counted" not in st.session_state:
+        st.session_state.view_counted = False
+
+    _init_counter_db()
+    conn = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)  # autocommit
+    try:
+        if not st.session_state.view_counted:
+            # 原子的にインクリメント
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute("UPDATE counters SET value = value + 1 WHERE name = ?;", ("page_views",))
+            conn.commit()
+            st.session_state.view_counted = True
+
+        cur = conn.execute("SELECT value FROM counters WHERE name = ?;", ("page_views",))
+        row = cur.fetchone()
+        total = row[0] if row else 0
+        return total
+    finally:
+        conn.close()
+
+def show_footer_counter() -> None:
+    total = increment_and_get_page_views()
+    st.markdown(
+        f"""
+        <style>
+        .footer-counter {{
+            color: #9aa0a6;        /* 薄いグレー */
+            font-size: 12px;       /* 小さめ */
+            text-align: center;
+            margin-top: 32px;
+            opacity: 0.9;
+        }}
+        </style>
+        <div class="footer-counter">累計アクセス：{total:,} 回</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # ==============================
@@ -404,3 +474,6 @@ else:
         st.session_state[key_name].append({"role": "assistant", "content": reply})
 
 st.caption("© 2025 English Practice App — Daily Chat + Shadowing + Roleplay (β)")
+
+# ---- footer: アクセスカウンター（薄い文字で下部に表示）----
+show_footer_counter()
