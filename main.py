@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import base64
 import sqlite3
 from dataclasses import dataclass
@@ -30,7 +31,7 @@ import streamlit.components.v1 as components
 # LLM 呼び出しは api_client に委譲（キー取得は utils 内部で自動解決）
 from api_client import chat as llm_chat
 
-APP_VERSION = "2025-09-26_17"
+APP_VERSION = "2025-09-26_18"
 
 # ===== Optional: mic recorder =====
 try:
@@ -119,13 +120,28 @@ def play_audio_js(mp3_bytes: bytes, nonce: str) -> None:
 
 
 def extract_english_for_tts(full_text: str, max_len: int = 600) -> str:
-    """返答文から 'JP:' 以降を除外して英語部分のみをTTS対象に。"""
-    lines = []
-    for line in full_text.splitlines():
-        if line.strip().startswith("JP:"):
-            break
-        lines.append(line)
-    eng = "\n".join(lines).strip() or full_text.strip()
+    """
+    返答文から日本語要約（JP: または JP： 以降）を除外して英語部分のみをTTS対象に。
+    - 行頭/行内どちらの 'JP:' 'JP：' でも検出（大文字小文字を無視）
+    - 全角コロン '：' にも対応
+    """
+    if not full_text:
+        return ""
+
+    # 優先: 行頭にある JP マーカー
+    m = re.search(r'(?im)^\s*jp\s*[:：]', full_text)
+    cut = m.start() if m else None
+
+    # 次点: 行内に出てくる JP マーカー（誤って同一行に書かれた場合に対応）
+    if cut is None:
+        m2 = re.search(r'(?i)\bjp\s*[:：]', full_text)
+        cut = m2.start() if m2 else len(full_text)
+
+    eng = full_text[:cut].strip()
+    if not eng:
+        eng = full_text.strip()
+
+    # 文字数を制限（TTSの安定性向上）
     return eng[:max_len]
 
 
@@ -372,7 +388,7 @@ if mode == "日常英会話":
                     reply = local_fallback_reply(st.session_state.daily_messages)
             st.markdown(reply)
 
-            # === 返答の英語部分をTTSで読み上げ（可視プレイヤー） ===
+            # === 返答の英語部分のみをTTSで読み上げ（JP: 以降は除外） ===
             eng = extract_english_for_tts(reply)
             mp3 = tts_cached(eng, lang="en")
             if mp3:
@@ -562,7 +578,7 @@ else:
                     reply = local_fallback_reply(st.session_state[key_name])
             st.markdown(reply)
 
-            # === 返答の英語部分をTTSで読み上げ（可視プレイヤー） ===
+            # === 返答の英語部分のみをTTSで読み上げ ===
             eng = extract_english_for_tts(reply)
             mp3 = tts_cached(eng, lang="en")
             if mp3:
