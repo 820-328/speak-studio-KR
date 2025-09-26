@@ -26,7 +26,7 @@ import streamlit as st
 # LLM 呼び出しは api_client に委譲（キー取得は utils 内部で自動解決）
 from api_client import chat as llm_chat
 
-APP_VERSION = "2025-09-26_10"
+APP_VERSION = "2025-09-26_11"
 
 # ===== Optional: mic recorder =====
 try:
@@ -210,38 +210,26 @@ if mode == "日常英会話":
                 ),
             }
         ]
-    # 安定キー用カウンタ
-    if "dc_msg_counter" not in st.session_state:
-        st.session_state.dc_msg_counter = 0
 
-    # render history (skip system) - 外側に container(key) を付ける
-    for i, m in enumerate(st.session_state.daily_messages):
+    # render history (skip system)
+    for m in st.session_state.daily_messages:
         if m["role"] == "system":
             continue
-        with st.container(key=f"dc_msg_{i}"):
-            with st.chat_message(m["role"]):
-                st.markdown(m["content"])
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
 
-    # 入力（chat_inputはkeyが使える想定。不要なら外してOK）
     user_text = st.chat_input("英語で話しかけてみよう…（日本語でもOK）", key="dc_input")
     if user_text:
         st.session_state.daily_messages.append({"role": "user", "content": user_text})
-
-        idx = st.session_state.dc_msg_counter
-        with st.container(key=f"dc_userblk_{idx}"):
-            with st.chat_message("user"):
-                st.markdown(user_text)
-
-        with st.container(key=f"dc_assistblk_{idx}"):
-            with st.chat_message("assistant"):
-                with st.spinner("考え中…"):
-                    reply = llm_chat(st.session_state.daily_messages)
-                    if reply is None:
-                        reply = local_fallback_reply(st.session_state.daily_messages)
-                st.markdown(reply)
-
+        with st.chat_message("user"):
+            st.markdown(user_text)
+        with st.chat_message("assistant"):
+            with st.spinner("考え中…"):
+                reply = llm_chat(st.session_state.daily_messages)
+                if reply is None:
+                    reply = local_fallback_reply(st.session_state.daily_messages)
+            st.markdown(reply)
         st.session_state.daily_messages.append({"role": "assistant", "content": reply})
-        st.session_state.dc_msg_counter += 1
 
 
 # ==============================
@@ -293,7 +281,7 @@ elif mode == "シャドーイング":
 
     st.markdown("#### あなたの発話を録音 / アップロード")
     wav_bytes: bytes | None = None
-    tabs = st.tabs(["マイクで録音", "WAV をアップロード"])  # st.audio_input は任意
+    tabs = st.tabs(["マイクで録音", "WAV をアップロード"])
 
     with tabs[0]:
         if not MIC_OK:
@@ -308,7 +296,7 @@ elif mode == "シャドーイング":
                 stop_prompt="🛑 停止",
                 key="shadow_rec",
                 use_container_width=True,
-                format="wav",  # ensure PCM WAV
+                format="wav",
             )
             if audio and isinstance(audio, dict) and audio.get("bytes"):
                 wav_bytes = audio["bytes"]
@@ -394,38 +382,25 @@ else:
         )
         st.session_state[key_name] = [{"role": "system", "content": sys_prompt}]
 
-    # シナリオごとの独立カウンタ（安定 key 用）
-    cnt_key = f"rp_cnt::{key_name}"
-    if cnt_key not in st.session_state:
-        st.session_state[cnt_key] = 0
-
-    # 履歴レンダリング：外側に container(key)
-    for i, m in enumerate(st.session_state[key_name]):
+    # 履歴表示
+    for m in st.session_state[key_name]:
         if m["role"] == "system":
             continue
-        with st.container(key=f"rp_msg_{key_name}_{i}"):
-            with st.chat_message(m["role"]):
-                st.markdown(m["content"])
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
 
-    # 入力（chat_input は key をサポート。不要なら外してOK）
+    # 入力
     user_input = st.chat_input("あなたのセリフ（日本語でもOK）", key=f"rp_input_{key_name}")
     if user_input:
         st.session_state[key_name].append({"role": "user", "content": user_input})
-
-        idx = st.session_state[cnt_key]
-        with st.container(key=f"rp_userblk_{key_name}_{idx}"):
-            with st.chat_message("user"):
-                st.markdown(user_input)
-
-        with st.container(key=f"rp_assistblk_{key_name}_{idx}"):
-            with st.chat_message("assistant"):
-                with st.spinner("相手役が考えています…"):
-                    reply = llm_chat(st.session_state[key_name])
-                    if reply is None:
-                        reply = local_fallback_reply(st.session_state[key_name])
-                st.markdown(reply)
-
+        with st.chat_message("user"):
+            st.markdown(user_input)
+        with st.chat_message("assistant"):
+            with st.spinner("相手役が考えています…"):
+                reply = llm_chat(st.session_state[key_name])
+                if reply is None:
+                    reply = local_fallback_reply(st.session_state[key_name])
+            st.markdown(reply)
         st.session_state[key_name].append({"role": "assistant", "content": reply})
-        st.session_state[cnt_key] += 1
 
 st.caption("© 2025 English Practice App — Daily Chat + Shadowing + Roleplay (β)")
