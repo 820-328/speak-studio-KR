@@ -31,7 +31,7 @@ import streamlit.components.v1 as components
 # LLM 呼び出しは api_client に委譲（キー取得は utils 内部で自動解決）
 from api_client import chat as llm_chat
 
-APP_VERSION = "2025-09-26_23b"
+APP_VERSION = "2025-09-26_24"
 
 # ===== Optional: mic recorder =====
 try:
@@ -238,7 +238,7 @@ def show_footer_counter(placement: str = "footer") -> None:
 
 
 # ==============================
-# Data for Shadowing
+# Data for Shadowing (各30文)
 # ==============================
 @dataclass
 class ShadowSentence:
@@ -249,36 +249,101 @@ class ShadowSentence:
 
 
 SENTENCES: List[ShadowSentence] = [
-    ShadowSentence(
-        id="A1-001",
-        text_en="Could you tell me how to get to the nearest station?",
-        text_ja="最寄り駅への行き方を教えていただけますか？",
-        hint="丁寧さを保ちつつ、語尾をはっきり。station の音に注意。",
-    ),
-    ShadowSentence(
-        id="A1-002",
-        text_en="I started learning English to improve my work communication.",
-        text_ja="仕事でのコミュニケーションを上達させるために英語の勉強を始めました。",
-        hint="started と communication の発音をゆっくり確認。",
-    ),
-    ShadowSentence(
-        id="A2-003",
-        text_en="Let me check my schedule and get back to you this afternoon.",
-        text_ja="予定を確認して、今日の午後に折り返し連絡します。",
-        hint="get back to you の連結と弱形、afternoon の第2音節を強めて。",
-    ),
-    ShadowSentence(
-        id="B1-004",
-        text_en="If we streamline the process, we can reduce errors and save time.",
-        text_ja="プロセスを合理化すれば、ミスを減らして時間を節約できます。",
-        hint="streamline の長音を過度に強調しない。",
-    ),
-    ShadowSentence(
-        id="B2-005",
-        text_en="With clearer goals and regular feedback, our team can maintain high motivation and keep improving.",
-        text_ja="目標を明確にし定期的なフィードバックを行えば、チームは高いモチベーションを維持し続けられます。",
-        hint="clearer と regular のリズムに注意。",
-    ),
+    # -------- やさしい (A1–A2): 30 ----------
+    ShadowSentence("A1-001","Hello! Nice to meet you.","こんにちは。はじめまして。","Hello と Nice の母音をはっきり。"),
+    ShadowSentence("A1-002","How are you today?","今日の調子はどう？","are を弱く、today に軽い強勢。"),
+    ShadowSentence("A1-003","I'm fine, thank you.","元気です、ありがとう。","I'm を短く、thank の th を無声音で。"),
+    ShadowSentence("A1-004","What’s your name?","お名前は？","what’s を一息で。"),
+    ShadowSentence("A1-005","My name is Ken.","私の名前はケンです。","name に軽く強勢。"),
+    ShadowSentence("A1-006","Where are you from?","どこの出身ですか？","are you を連結。"),
+    ShadowSentence("A1-007","I'm from Tokyo.","東京出身です。","from を弱く短く。"),
+    ShadowSentence("A1-008","What do you do?","お仕事は何ですか？","do you を連結。"),
+    ShadowSentence("A1-009","I work in sales.","営業の仕事をしています。","work に強勢、in は弱く。"),
+    ShadowSentence("A1-010","Do you like coffee?","コーヒーは好き？","like に強勢。"),
+    ShadowSentence("A1-011","Yes, I do.","はい、好きです。","Yes をすっきり短く。"),
+    ShadowSentence("A1-012","No, not really.","いいえ、あまり。","not をはっきり。"),
+    ShadowSentence("A1-013","What time is it?","今、何時ですか？","time を明瞭に。"),
+    ShadowSentence("A1-014","It’s almost noon.","もうすぐ正午です。","almost の l を軽く。"),
+    ShadowSentence("A1-015","Could you say that again?","もう一度言ってもらえますか？","that again を滑らかに。"),
+    ShadowSentence("A1-016","I don’t understand.","わかりません。","don’t の n’t を弱く。"),
+    ShadowSentence("A1-017","Please speak slowly.","ゆっくり話してください。","speak を長くしすぎない。"),
+    ShadowSentence("A1-018","Where is the station?","駅はどこですか？","the を弱く、station を明瞭に。"),
+    ShadowSentence("A1-019","Turn left at the corner.","角で左に曲がってください。","turn と left にリズム。"),
+    ShadowSentence("A1-020","How much is this?","これはいくらですか？","how を上げ調子で。"),
+    ShadowSentence("A1-021","I’d like this one.","これをください。","I’d like を滑らかに。"),
+    ShadowSentence("A1-022","Can I pay by card?","カードで払えますか？","pay を明瞭に。"),
+    ShadowSentence("A1-023","I have a reservation.","予約があります。","have a を連結。"),
+    ShadowSentence("A1-024","Just a moment, please.","少々お待ちください。","moment をはっきり。"),
+    ShadowSentence("A1-025","I’m learning English.","英語を学んでいます。","learning の ing を弱く。"),
+    ShadowSentence("A1-026","I practice every day.","毎日練習しています。","every day を二語で。"),
+    ShadowSentence("A1-027","That sounds great!","それはいいですね！","sounds の s をはっきり。"),
+    ShadowSentence("A1-028","See you tomorrow.","また明日。","tomorrow の第二音節に強勢。"),
+    ShadowSentence("A1-029","Take care on your way.","気をつけて帰ってね。","take care を柔らかく。"),
+    ShadowSentence("A1-030","Have a nice weekend!","良い週末を！","nice に軽く強勢。"),
+
+    # -------- ふつう (B1): 30 ----------
+    ShadowSentence("B1-001","I started learning English to improve my communication at work.","仕事でのコミュニケーションを高めるために英語を学び始めました。","started と improve の母音。"),
+    ShadowSentence("B1-002","Could you give me a quick summary of the meeting?","会議の要点を手短に教えてくれますか？","quick summary を軽快に。"),
+    ShadowSentence("B1-003","If we plan ahead, we can avoid most issues.","事前に計画すれば、ほとんどの問題を避けられます。","plan ahead を連結。"),
+    ShadowSentence("B1-004","Let me check my schedule and get back to you this afternoon.","予定を確認して、今日の午後に折り返します。","get back to you の弱形。"),
+    ShadowSentence("B1-005","I’ll send you the file once I finish editing.","編集が終わったらファイルを送ります。","once I を連結。"),
+    ShadowSentence("B1-006","We need to streamline the process to save time.","時間節約のためにプロセスを効率化する必要があります。","streamline を伸ばしすぎない。"),
+    ShadowSentence("B1-007","Thanks for your patience while we investigate.","調査の間お待ちいただきありがとうございます。","patience を明瞭に。"),
+    ShadowSentence("B1-008","It would help if you could share more context.","詳しい背景を共有していただけると助かります。","would help if を滑らかに。"),
+    ShadowSentence("B1-009","I prefer to discuss this in person.","これについては対面で話したいです。","prefer に強勢。"),
+    ShadowSentence("B1-010","Can we reschedule for tomorrow morning?","明日の朝に予定変更できますか？","reschedule の /ʃ/。"),
+    ShadowSentence("B1-011","I’m not sure yet, but I’ll let you know soon.","まだ分かりませんが、すぐに連絡します。","I’ll let you を連結。"),
+    ShadowSentence("B1-012","Let’s focus on the main points first.","まず主要なポイントに集中しましょう。","focus on を連結。"),
+    ShadowSentence("B1-013","I really appreciate your feedback.","フィードバックに感謝します。","appreciate の /ʃiːeɪt/。"),
+    ShadowSentence("B1-014","We ran into a few unexpected problems.","いくつか予期しない問題が起きました。","ran into を連結。"),
+    ShadowSentence("B1-015","I’ll handle the rest from here.","ここから先は私が対応します。","handle の /hæn/。"),
+    ShadowSentence("B1-016","Please let me know if anything changes.","何か変更があれば知らせてください。","let me を連結。"),
+    ShadowSentence("B1-017","It’s better to keep the explanation simple.","説明はシンプルに保つのが良いです。","better to を弱く。"),
+    ShadowSentence("B1-018","We can reduce errors with clearer instructions.","より明確な指示でミスを減らせます。","reduce errors を滑らかに。"),
+    ShadowSentence("B1-019","I’ll share the document after the call.","通話後に資料を共有します。","after the の th 弱形。"),
+    ShadowSentence("B1-020","Could you walk me through the steps?","手順を順を追って説明してくれますか？","walk me through を連結。"),
+    ShadowSentence("B1-021","I’m open to suggestions from the team.","チームからの提案を歓迎します。","open to を連結。"),
+    ShadowSentence("B1-022","Let’s take a short break and continue later.","少し休憩して後で続けましょう。","short break を明瞭に。"),
+    ShadowSentence("B1-023","We’ll need a couple of days to review this.","これを確認するのに2〜3日必要です。","couple of を /kʌpləv/。"),
+    ShadowSentence("B1-024","Thanks for pointing that out.","指摘してくれてありがとう。","pointing that を連結。"),
+    ShadowSentence("B1-025","I’ll double-check the numbers before sending.","送信前に数値を再確認します。","double-check に強勢。"),
+    ShadowSentence("B1-026","This approach seems more practical.","このアプローチの方が現実的に見えます。","approach の /prou/。"),
+    ShadowSentence("B1-027","Let’s keep the conversation respectful and clear.","会話は礼儀正しく明確に進めましょう。","respectful を丁寧に。"),
+    ShadowSentence("B1-028","I’m happy to help as needed.","必要に応じて喜んで手伝います。","happy を短くはっきり。"),
+    ShadowSentence("B1-029","Please share an example to illustrate your point.","例を挙げて説明してください。","illustrate を /ɪləstreɪt/。"),
+    ShadowSentence("B1-030","We’ll follow up with next steps by email.","次の手順はメールで連絡します。","follow up を連結。"),
+
+    # -------- むずかしい (B2): 30 ----------
+    ShadowSentence("B2-001","With clearer goals and regular feedback, the team can sustain motivation and keep improving.","目標が明確で定期的なフィードバックがあれば、チームは意欲を維持し成長し続けられます。","clearer と regular のリズム。"),
+    ShadowSentence("B2-002","If we align expectations early, we’ll prevent confusion down the line.","期待値を早めに揃えれば、後々の混乱を防げます。","align expectations を滑らかに。"),
+    ShadowSentence("B2-003","I recommend prioritizing impact over effort when choosing tasks.","タスク選定では労力より効果を優先することを勧めます。","prioritizing の /praɪ/。"),
+    ShadowSentence("B2-004","Given the constraints, this compromise is both realistic and fair.","制約を踏まえると、この妥協案は現実的で公平です。","Given the を弱く。"),
+    ShadowSentence("B2-005","Let’s define success metrics before we commit resources.","資源を投下する前に成功指標を定義しましょう。","define success metrics を明瞭に。"),
+    ShadowSentence("B2-006","Could you elaborate on the risks you anticipate?","想定しているリスクについて詳しく説明してもらえますか？","elaborate の /ɪˈlæ/。"),
+    ShadowSentence("B2-007","We should validate assumptions with a small experiment first.","仮説はまず小さな実験で検証すべきです。","validate assumptions を連結。"),
+    ShadowSentence("B2-008","I appreciate the initiative, but we need broader consensus.","主体性は評価しますが、より広い合意が必要です。","initiative の /ɪˈnɪ/。"),
+    ShadowSentence("B2-009","Our timeline is ambitious, yet achievable with focus.","スケジュールは野心的ですが、集中すれば達成可能です。","ambitious yet を滑らかに。"),
+    ShadowSentence("B2-010","Please back up your proposal with data and examples.","提案をデータと例で裏付けてください。","back up your を連結。"),
+    ShadowSentence("B2-011","Let’s document decisions to avoid future ambiguity.","将来の曖昧さを避けるため、決定事項を記録しましょう。","document decisions を明瞭に。"),
+    ShadowSentence("B2-012","I’m concerned about hidden costs and maintenance overhead.","隠れたコストと保守の負担が気になります。","maintenance の /meɪn/。"),
+    ShadowSentence("B2-013","We can iterate quickly as long as feedback loops are tight.","フィードバックループが短ければ素早く反復できます。","iterate quickly を軽快に。"),
+    ShadowSentence("B2-014","This trade-off favors reliability over raw speed.","このトレードオフは速度より信頼性を重視します。","trade-off をはっきり。"),
+    ShadowSentence("B2-015","The proposal addresses most concerns but leaves security open.","提案は多くの懸念に対処しますが、セキュリティは未解決です。","addresses most を連結。"),
+    ShadowSentence("B2-016","We’ll escalate if the issue persists after mitigation.","緩和策後も問題が続く場合はエスカレーションします。","escalate の /ɛs/。"),
+    ShadowSentence("B2-017","It’s essential to separate facts from assumptions.","事実と仮定を切り分けることが重要です。","separate facts を明瞭に。"),
+    ShadowSentence("B2-018","Let’s run a retrospective to capture lessons learned.","振り返りを実施して学びを記録しましょう。","retrospective のリズム。"),
+    ShadowSentence("B2-019","I suggest we pilot this with a small user group.","小規模なユーザー群で試験運用することを提案します。","pilot this を滑らかに。"),
+    ShadowSentence("B2-020","We should clarify ownership to streamline decisions.","意思決定を効率化するため、責任範囲を明確にしましょう。","clarify ownership を明瞭に。"),
+    ShadowSentence("B2-021","Please challenge my idea if you see a better path.","より良い道が見えるなら、遠慮なく私の案に異議を唱えてください。","challenge my idea を流れるように。"),
+    ShadowSentence("B2-022","Our constraints require creative yet practical solutions.","制約があるため、創造的で実用的な解決策が必要です。","creative yet practical を滑らかに。"),
+    ShadowSentence("B2-023","We’ll de-risk this by phasing delivery and gathering feedback.","段階的な提供とフィードバック収集でリスクを下げます。","de-risk を明瞭に。"),
+    ShadowSentence("B2-024","Let’s align on scope before discussing timelines.","スケジュールの前にスコープを揃えましょう。","align on scope を連結。"),
+    ShadowSentence("B2-025","Please summarize the trade-offs in a single slide.","トレードオフを1枚のスライドに要約してください。","summarize the を連結。"),
+    ShadowSentence("B2-026","I’m confident we can reach a balanced decision.","バランスの取れた決定に至れると確信しています。","confident をはっきり。"),
+    ShadowSentence("B2-027","Assuming stable requirements, we can deliver in two sprints.","要件が安定していれば、2スプリントで提供できます。","assuming stable を滑らかに。"),
+    ShadowSentence("B2-028","This path minimizes risk while preserving flexibility.","この道は柔軟性を保ちながらリスクを最小化します。","minimizes risk を明瞭に。"),
+    ShadowSentence("B2-029","We need explicit success criteria to evaluate outcomes.","成果を評価する明確な成功基準が必要です。","explicit success をはっきり。"),
+    ShadowSentence("B2-030","Let’s communicate updates proactively to build trust.","信頼を築くため、主体的に進捗を発信しましょう。","communicate updates を連結。"),
 ]
 
 
@@ -312,7 +377,7 @@ st.markdown(CSS_BLOCK, unsafe_allow_html=True)
 st.header("SpeakStudio")
 st.caption("Version: " + APP_VERSION)
 
-# ★（β）を外したラジオ項目
+# （β）無しのラジオ項目
 mode = st.radio("モードを選択", ("日常英会話", "シャドーイング", "ロールプレイ"), index=0)
 
 
@@ -457,15 +522,18 @@ elif mode == "シャドーイング":
     )
     st.markdown(NOTE_HTML, unsafe_allow_html=True)
 
+    # レベル → ID リスト（各30）
     levels = {
-        "やさしい(A1–A2)": ["A1-001", "A1-002", "A2-003"],
-        "ふつう(B1)": ["B1-004"],
-        "むずかしい(B2)": ["B2-005"],
+        "やさしい(A1–A2)": [f"A1-{i:03d}" for i in range(1, 31)],
+        "ふつう(B1)": [f"B1-{i:03d}" for i in range(1, 31)],
+        "むずかしい(B2)": [f"B2-{i:03d}" for i in range(1, 31)],
     }
+
+    id_to_sent = {s.id: s for s in SENTENCES}
+
     col1, col2 = st.columns([1, 2])
     with col1:
         level = st.selectbox("レベル", list(levels.keys()), index=0)
-        id_to_sent = {s.id: s for s in SENTENCES}
         choices = levels[level]
         sel_id = st.selectbox(
             "文例",
