@@ -1,7 +1,5 @@
-﻿streamlit==1.38.0
-openai>=1.51.0
-python-dotenv>=1.0.1
-gTTS
+﻿streamlit>=1.38
+streamlit-mic-recorder
 SpeechRecognition
-streamlit-mic-recorder
-streamlit-mic-recorder
+gTTS
+openai>=1.44.0

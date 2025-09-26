@@ -31,7 +31,7 @@ import streamlit.components.v1 as components
 # LLM 呼び出しは api_client に委譲（キー取得は utils 内部で自動解決）
 from api_client import chat as llm_chat
 
-APP_VERSION = "2025-09-26_18"
+APP_VERSION = "2025-09-26_20"
 
 # ===== Optional: mic recorder =====
 try:
@@ -93,32 +93,6 @@ def tts_cached(text: str, lang: str = "en") -> bytes | None:
     return tts_bytes(text, lang)
 
 
-def play_audio_js(mp3_bytes: bytes, nonce: str) -> None:
-    """
-    コントロール無し・即再生。クリック毎に nonce を変えて確実に再生。
-    components.html は key を受け取らないため、HTML文字列自体を毎回変える。
-    """
-    if not mp3_bytes:
-        return
-    b64 = base64.b64encode(mp3_bytes).decode("ascii")
-    # height>0 にしないと描画されない環境があるため 10px
-    components.html(
-        f"""
-        <!-- nonce:{nonce} -->
-        <audio id="ghost-audio-{nonce}" src="data:audio/mp3;base64,{b64}" style="display:none"></audio>
-        <script>
-          const a = document.getElementById('ghost-audio-{nonce}');
-          if (a) {{
-            a.currentTime = 0;
-            a.play().catch(() => {{ /* autoplay 制限時は無視 */ }});
-          }}
-        </script>
-        """,
-        height=10,
-        scrolling=False,
-    )
-
-
 def extract_english_for_tts(full_text: str, max_len: int = 600) -> str:
     """
     返答文から日本語要約（JP: または JP： 以降）を除外して英語部分のみをTTS対象に。
@@ -132,7 +106,7 @@ def extract_english_for_tts(full_text: str, max_len: int = 600) -> str:
     m = re.search(r'(?im)^\s*jp\s*[:：]', full_text)
     cut = m.start() if m else None
 
-    # 次点: 行内に出てくる JP マーカー（誤って同一行に書かれた場合に対応）
+    # 次点: 行内に出てくる JP マーカー
     if cut is None:
         m2 = re.search(r'(?i)\bjp\s*[:：]', full_text)
         cut = m2.start() if m2 else len(full_text)
@@ -141,7 +115,6 @@ def extract_english_for_tts(full_text: str, max_len: int = 600) -> str:
     if not eng:
         eng = full_text.strip()
 
-    # 文字数を制限（TTSの安定性向上）
     return eng[:max_len]
 
 
@@ -349,6 +322,59 @@ def format_sentence_option(sid: str, id_to_sent: Dict[str, ShadowSentence]) -> s
     return f"{sid} : {preview}"
 
 
+# -------------------------------------------------
+# モバイル対応：HTML内のボタンで確実に再生（同一ユーザー操作内で play）
+# -------------------------------------------------
+def render_inline_play_button(mp3_bytes: bytes | None, label: str = "▶ お手本を再生") -> None:
+    """
+    iOS/Android の自動再生制限に対応するため、
+    HTMLコンポーネント内にボタンと <audio> を同居させ、
+    そのクリックイベント内で play() を呼ぶ。
+    """
+    if not mp3_bytes:
+        st.markdown("<div class='warn'>お手本音声の生成に失敗しました。</div>", unsafe_allow_html=True)
+        return
+
+    b64 = base64.b64encode(mp3_bytes).decode("ascii")
+    components.html(
+        f"""
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="demoPlayBtn" style="
+              background:#0b5cff;color:#fff;border:none;border-radius:8px;
+              padding:8px 14px;cursor:pointer;font-size:14px;">
+            {label}
+          </button>
+          <span id="demoHint" style="font-size:12px;color:#6b7280;"></span>
+          <audio id="demoAudio" preload="auto" playsinline>
+            <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+          </audio>
+        </div>
+        <script>
+          const btn = document.getElementById('demoPlayBtn');
+          const aud = document.getElementById('demoAudio');
+          const hint = document.getElementById('demoHint');
+          function playOnce() {{
+            try {{
+              aud.pause();
+              aud.currentTime = 0;
+              const p = aud.play();
+              if (p) {{
+                p.then(() => {{ hint.textContent = ""; }}).catch(() => {{
+                  hint.textContent = "再生がブロックされました。端末のサイレント解除や音量を確認してください。";
+                }});
+              }}
+            }} catch(e) {{
+              hint.textContent = "再生できませんでした。";
+            }}
+          }}
+          btn.addEventListener('click', playOnce);
+        </script>
+        """,
+        height=50,
+        scrolling=False,
+    )
+
+
 # ==============================
 # 1) Daily Chat
 # ==============================
@@ -440,18 +466,9 @@ elif mode == "シャドーイング":
     # === お手本音声を事前生成（選択した文に対して一度だけ） ===
     demo_mp3 = tts_cached(target.text_en, lang="en")
 
-    # === お手本の発音：押すたびに毎回・即再生（コントロール非表示） ===
+    # === お手本の発音：モバイルでも確実に鳴るインラインボタン ===
     st.markdown("#### お手本の発音")
-    if st.button("▶ お手本を再生", key=f"demo_tts_btn_{sel_id}"):
-        if demo_mp3:
-            hit_count = st.session_state.get("_demo_hits", 0) + 1
-            st.session_state["_demo_hits"] = hit_count
-            play_audio_js(demo_mp3, nonce=f"{sel_id}-{hit_count}")
-        else:
-            st.markdown(
-                "<div class='warn'>お手本音声の生成に失敗しました。ネットワークや gTTS の状態をご確認ください。</div>",
-                unsafe_allow_html=True,
-            )
+    render_inline_play_button(demo_mp3, label="▶ お手本を再生")
 
     st.divider()
 
@@ -495,7 +512,7 @@ elif mode == "シャドーイング":
             st.write(recognized)
 
             score = similarity_score(target.text_en, recognized)
-            st.markdown("#### 類似度スコア: **" + f"{score*100:.1f}%" + "**")
+            st.markdown("#### 类似度スコア: **" + f"{score*100:.1f}%" + "**")
 
             st.markdown("#### 差分 (緑=追加/置換, 赤=不足)")
             html = diff_html(target.text_en, recognized)
