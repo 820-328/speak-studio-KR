@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-English Practice App (Streamlit)
+SpeakStudio (Streamlit)
 - Modes: Daily Chat / Shadowing / Roleplay (beta)
 - Windows 11 + Python 3.10-3.12
 
@@ -31,7 +31,7 @@ import streamlit.components.v1 as components
 # LLM 呼び出しは api_client に委譲（キー取得は utils 内部で自動解決）
 from api_client import chat as llm_chat
 
-APP_VERSION = "2025-09-26_22a"
+APP_VERSION = "2025-09-26_23"
 
 # ===== Optional: mic recorder =====
 try:
@@ -285,7 +285,7 @@ SENTENCES: List[ShadowSentence] = [
 # ==============================
 # Page setup & styles
 # ==============================
-st.set_page_config(page_title="英会話アプリ", layout="wide")
+st.set_page_config(page_title="SpeakStudio", layout="wide")
 
 # ★ モバイルで白文字化されないように、文字色を強制（!important）
 CSS_BLOCK = "\n".join(
@@ -308,8 +308,10 @@ CSS_BLOCK = "\n".join(
 )
 st.markdown(CSS_BLOCK, unsafe_allow_html=True)
 
-st.title("英会話アプリ")
+# タイトルを一段小さい見出し（h2）で表示
+st.header("SpeakStudio")
 st.caption("Version: " + APP_VERSION)
+
 mode = st.radio("モードを選択", ("日常英会話", "シャドーイング", "ロールプレイ（β）"), index=0)
 
 
@@ -489,6 +491,7 @@ elif mode == "シャドーイング":
 
     st.divider()
 
+    st.markdown(" ")
     st.markdown("#### あなたの発話を録音 / アップロード")
     wav_bytes: bytes | None = None
     tabs = st.tabs(["マイクで録音", "WAV をアップロード"])
@@ -620,7 +623,7 @@ else:
         st.session_state[key_name].append({"role": "assistant", "content": reply})
 
 # 共通フッター
-st.caption("© 2025 English Practice App — Daily Chat + Shadowing + Roleplay (β)")
+st.caption("© 2025 SpeakStudio — Daily Chat + Shadowing + Roleplay (β)")
 
 # 日常英会話以外では通常フッター位置に表示
 if mode != "日常英会話":
