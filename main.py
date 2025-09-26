@@ -28,7 +28,7 @@ import streamlit as st
 # LLM 呼び出しは api_client に委譲（キー取得は utils 内部で自動解決）
 from api_client import chat as llm_chat
 
-APP_VERSION = "2025-09-26_11"
+APP_VERSION = "2025-09-26_12"
 
 # ===== Optional: mic recorder =====
 try:
@@ -165,23 +165,55 @@ def increment_and_get_page_views() -> int:
     finally:
         conn.close()
 
-def show_footer_counter() -> None:
+def show_footer_counter(placement: str = "footer") -> None:
+    """
+    placement:
+      - "footer": 通常のページ下部に表示
+      - "below_input": チャット入力欄のさらに下（画面最下部）に固定表示
+    """
     total = increment_and_get_page_views()
-    st.markdown(
-        f"""
-        <style>
-        .footer-counter {{
-            color: #9aa0a6;        /* 薄いグレー */
-            font-size: 12px;       /* 小さめ */
-            text-align: center;
-            margin-top: 32px;
-            opacity: 0.9;
-        }}
-        </style>
-        <div class="footer-counter">累計アクセス：{total:,} 回</div>
-        """,
-        unsafe_allow_html=True,
-    )
+
+    if placement == "below_input":
+        # 入力欄下に余白を作り、最下部に固定配置でカウンター表示（入力の操作を邪魔しない）
+        st.markdown(
+            f"""
+            <style>
+              /* ChatInputの下に少し余白を空ける（被り防止） */
+              [data-testid="stChatInput"] {{ margin-bottom: 28px; }}
+
+              /* 画面最下部に固定する薄いカウンター */
+              .footer-counter-fixed {{
+                position: fixed;
+                left: 0; right: 0;
+                bottom: 6px;
+                text-align: center;
+                color: #9aa0a6;
+                font-size: 12px;
+                opacity: 0.9;
+                pointer-events: none; /* クリック干渉しない */
+                z-index: 999;
+              }}
+            </style>
+            <div class="footer-counter-fixed">累計アクセス：{total:,} 回</div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"""
+            <style>
+            .footer-counter {{
+                color: #9aa0a6;        /* 薄いグレー */
+                font-size: 12px;       /* 小さめ */
+                text-align: center;
+                margin-top: 32px;
+                opacity: 0.9;
+            }}
+            </style>
+            <div class="footer-counter">累計アクセス：{total:,} 回</div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 # ==============================
@@ -300,6 +332,9 @@ if mode == "日常英会話":
                     reply = local_fallback_reply(st.session_state.daily_messages)
             st.markdown(reply)
         st.session_state.daily_messages.append({"role": "assistant", "content": reply})
+
+    # ★ 入力欄の“さらに下”に固定してカウンター表示
+    show_footer_counter(placement="below_input")
 
 
 # ==============================
@@ -473,7 +508,9 @@ else:
             st.markdown(reply)
         st.session_state[key_name].append({"role": "assistant", "content": reply})
 
+# 共通フッター
 st.caption("© 2025 English Practice App — Daily Chat + Shadowing + Roleplay (β)")
 
-# ---- footer: アクセスカウンター（薄い文字で下部に表示）----
-show_footer_counter()
+# 日常英会話以外では通常フッター位置に表示
+if mode != "日常英会話":
+    show_footer_counter(placement="footer")
