@@ -4,3 +4,4 @@ python-dotenv>=1.0.1
 gTTS
 SpeechRecognition
 streamlit-mic-recorder
+streamlit-mic-recorder
