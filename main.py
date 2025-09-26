@@ -31,7 +31,7 @@ import streamlit.components.v1 as components
 # LLM 呼び出しは api_client に委譲（キー取得は utils 内部で自動解決）
 from api_client import chat as llm_chat
 
-APP_VERSION = "2025-09-26_21"
+APP_VERSION = "2025-09-26_22a"
 
 # ===== Optional: mic recorder =====
 try:
@@ -287,15 +287,22 @@ SENTENCES: List[ShadowSentence] = [
 # ==============================
 st.set_page_config(page_title="英会話アプリ", layout="wide")
 
+# ★ モバイルで白文字化されないように、文字色を強制（!important）
 CSS_BLOCK = "\n".join(
     [
         "<style>",
-        ".note {background:#f6f9ff;border:1px solid #c9dcff;border-radius:10px;padding:10px 12px;margin:8px 0;}",
-        ".warn {background:#fff8f6;border:1px solid #ffd3c6;border-radius:10px;padding:10px 12px;margin:8px 0;}",
-        ".good {background:#f6fff6;border:1px solid #c6ffd3;border-radius:10px;padding:10px 12px;margin:8px 0;}",
+        ".note {background:#e9f1ff;border:1px solid #bcd3ff;border-radius:10px;padding:10px 12px;margin:8px 0;}",
+        ".warn {background:#fff1ec;border:1px solid #ffc7b5;border-radius:10px;padding:10px 12px;margin:8px 0;}",
+        ".good {background:#ecfff1;border:1px solid #b9f5c9;border-radius:10px;padding:10px 12px;margin:8px 0;}",
         ".add {background:#e7ffe7;border:1px solid #b8f5b8;border-radius:6px;padding:1px 4px;margin:0 1px;}",
         ".del {background:#ffecec;border:1px solid #ffc5c5;border-radius:6px;padding:1px 4px;margin:0 1px;text-decoration:line-through;}",
         ".idpill {display:inline-block;background:#222;color:#fff;border-radius:8px;padding:2px 8px;font-size:12px;margin-right:6px;}",
+        "/* テキスト色を濃いグレーで強制（内部の子要素も含む） */",
+        ".note, .note * { color:#111 !important; }",
+        ".warn, .warn * { color:#111 !important; }",
+        ".good, .good * { color:#111 !important; }",
+        "/* 予防的に、Markdown直下の色が白に上書きされている場合への対策 */",
+        ".stMarkdown, .stMarkdown * { -webkit-text-fill-color: inherit !important; }",
         "</style>",
     ]
 )
@@ -326,7 +333,6 @@ def render_inline_play_button(mp3_bytes: bytes | None, label: str = "🔊 再生
         return
 
     b64 = base64.b64encode(mp3_bytes).decode("ascii")
-    # 注意: iOS Safari ではユーザー操作内での AudioContext.resume() が必要
     components.html(
         f"""
         <div style="display:flex;gap:8px;align-items:center;">
@@ -477,6 +483,7 @@ elif mode == "シャドーイング":
     demo_mp3 = tts_cached(target.text_en, lang="en")
 
     # モバイルでも確実 & 音量ブースト（1.8倍）
+    st.markdown(" ")
     st.markdown("#### お手本の発音")
     render_inline_play_button(demo_mp3, label="▶ お手本を再生", boost=1.8)
 
