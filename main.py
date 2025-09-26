@@ -28,7 +28,7 @@ import streamlit as st
 # LLM 呼び出しは api_client に委譲（キー取得は utils 内部で自動解決）
 from api_client import chat as llm_chat
 
-APP_VERSION = "2025-09-26_12"
+APP_VERSION = "2025-09-26_13"
 
 # ===== Optional: mic recorder =====
 try:
@@ -82,6 +82,26 @@ def tts_bytes(text: str, lang: str = "en") -> bytes | None:
         return buf.read()
     except Exception:
         return None
+
+
+def extract_english_for_tts(full_text: str, max_len: int = 600) -> str:
+    """
+    返答文から 'JP:' 以降を除外して英語部分のみをTTS対象に。
+    マークダウン記号はそのままでも大きな問題はないが、長すぎると失敗しやすいので上限を設ける。
+    """
+    # 1行ごとに見て JP: で打ち切り
+    lines = []
+    for line in full_text.splitlines():
+        if line.strip().startswith("JP:"):
+            break
+        lines.append(line)
+    eng = "\n".join(lines).strip()
+    if not eng:
+        eng = full_text.strip()
+    # 長すぎる場合は丸める
+    if len(eng) > max_len:
+        eng = eng[:max_len]
+    return eng
 
 
 def stt_from_wav_bytes(wav_bytes: bytes, language: str = "en-US") -> Tuple[bool, str]:
@@ -298,7 +318,7 @@ def format_sentence_option(sid: str, id_to_sent: Dict[str, ShadowSentence]) -> s
 # ==============================
 if mode == "日常英会話":
     st.subheader("日常英会話")
-    st.caption("※ OpenAI キーがない場合は簡易ローカル応答")
+    st.caption("※ OpenAI キーがない場合は簡易ローカル応答（音声なし）")
 
     if "daily_messages" not in st.session_state:
         st.session_state.daily_messages = [
@@ -331,9 +351,18 @@ if mode == "日常英会話":
                 if reply is None:
                     reply = local_fallback_reply(st.session_state.daily_messages)
             st.markdown(reply)
+
+            # === 返答の英語部分をTTSで読み上げ ===
+            eng = extract_english_for_tts(reply)
+            mp3 = tts_bytes(eng, lang="en")
+            if mp3:
+                st.audio(mp3, format="audio/mp3")
+            else:
+                st.caption("（音声生成に失敗：ネットワークまたは gTTS の状態をご確認ください）")
+
         st.session_state.daily_messages.append({"role": "assistant", "content": reply})
 
-    # ★ 入力欄の“さらに下”に固定してカウンター表示
+    # 入力欄の“さらに下”に固定カウンター
     show_footer_counter(placement="below_input")
 
 
@@ -372,15 +401,17 @@ elif mode == "シャドーイング":
             st.write(target.text_ja)
             st.caption(target.hint)
 
-    # TTS playback
-    tts_mp3 = tts_bytes(target.text_en, lang="en")
-    if tts_mp3:
-        st.audio(tts_mp3, format="audio/mp3")
-    else:
-        WARN_HTML = (
-            "<div class='warn'>TTS 生成に失敗。ネットワークや gTTS の状態を確認してください。英文を見ながら発話してOKです。</div>"
-        )
-        st.markdown(WARN_HTML, unsafe_allow_html=True)
+    # === お手本の発音：ボタンを押したら再生 ===
+    st.markdown("#### お手本の発音")
+    if st.button("▶ お手本を再生", key=f"demo_tts_btn_{sel_id}"):
+        demo_mp3 = tts_bytes(target.text_en, lang="en")
+        if demo_mp3:
+            st.audio(demo_mp3, format="audio/mp3")
+        else:
+            WARN_HTML = (
+                "<div class='warn'>TTS 生成に失敗。ネットワークや gTTS の状態を確認してください。英文を見ながら発話してOKです。</div>"
+            )
+            st.markdown(WARN_HTML, unsafe_allow_html=True)
 
     st.divider()
 
@@ -453,7 +484,7 @@ elif mode == "シャドーイング":
 # ==============================
 else:
     st.subheader("ロールプレイ（β）")
-    st.caption("※ OpenAI キーがない場合は簡易ローカル応答")
+    st.caption("※ OpenAI キーがない場合は簡易ローカル応答（音声なし）")
 
     scenarios = {
         "ホテルのチェックイン": "You are a hotel front desk staff. Be polite and concise. Ask for the guest's name and reservation details.",
@@ -506,6 +537,15 @@ else:
                 if reply is None:
                     reply = local_fallback_reply(st.session_state[key_name])
             st.markdown(reply)
+
+            # === 返答の英語部分をTTSで読み上げ ===
+            eng = extract_english_for_tts(reply)
+            mp3 = tts_bytes(eng, lang="en")
+            if mp3:
+                st.audio(mp3, format="audio/mp3")
+            else:
+                st.caption("（音声生成に失敗：ネットワークまたは gTTS の状態をご確認ください）")
+
         st.session_state[key_name].append({"role": "assistant", "content": reply})
 
 # 共通フッター
