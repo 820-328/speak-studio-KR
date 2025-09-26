@@ -1,55 +1,91 @@
 APP_NAME = "生成AI英会話アプリ"
-MODE_1 = "日常英会話"
-MODE_2 = "シャドーイング"
-MODE_3 = "ディクテーション"
-USER_ICON_PATH = "images/user_icon.jpg"
-AI_ICON_PATH = "images/ai_icon.jpg"
-AUDIO_INPUT_DIR = "audio/input"
-AUDIO_OUTPUT_DIR = "audio/output"
-PLAY_SPEED_OPTION = [2.0, 1.5, 1.2, 1.0, 0.8, 0.6]
-ENGLISH_LEVEL_OPTION = ["初級者", "中級者", "上級者"]
 
-# 英語講師として自由な会話をさせ、文法間違いをさりげなく訂正させるプロンプト
+
+# 難易度ごとのスタイル指示（プロンプトにインライン展開）
+LEVEL_STYLE = {
+"初級者": (
+"Use CEFR A2-level English. Keep grammar simple (present/past, basic modals). "
+"Prefer 8-15 words per sentence. Avoid idioms/slang. Slow pace."
+),
+"中級者": (
+"Use CEFR B1–B2 English. Natural expressions and some phrasal verbs. "
+"Prefer 12–20 words per sentence. Allow subordinate clauses."
+),
+"上級者": (
+"Use CEFR C1 English. Nuanced vocabulary and complex structures. "
+"Prefer 15–25 words per sentence. Encourage idioms and register shifts when apt."
+),
+}
+
+
+# 英会話：毎ターンの出力を定型化（曖昧さを排除）
 SYSTEM_TEMPLATE_BASIC_CONVERSATION = """
-    You are a conversational English tutor. Engage in a natural and free-flowing conversation with the user. If the user makes a grammatical error, subtly correct it within the flow of the conversation to maintain a smooth interaction. Optionally, provide an explanation or clarification after the conversation ends.
+You are a conversational English tutor for a {level_label} learner.
+{level_style}
+
+
+Rules:
+- Keep the conversation flowing naturally.
+- When the user makes mistakes, correct them gently and explicitly.
+- Output in **exactly** this 3-part format, every time:
+
+
+[Reply]
+<Your reply in English, 1–3 sentences>
+
+
+[Corrections]
+- 'wrong phrase' → 'better phrase' (short reason)
+- If none, write: None
+
+
+[日本語アドバイス]
+- 学習者向けの短いヒントを1行（日本語）
 """
 
-# 約15語のシンプルな英文生成を指示するプロンプト
+
+# ランダム英文出題（難易度を反映）
 SYSTEM_TEMPLATE_CREATE_PROBLEM = """
-    Generate 1 sentence that reflect natural English used in daily conversations, workplace, and social settings:
-    - Casual conversational expressions
-    - Polite business language
-    - Friendly phrases used among friends
-    - Sentences with situational nuances and emotions
-    - Expressions reflecting cultural and regional contexts
-
-    Limit your response to an English sentence of approximately 15 words with clear and understandable context.
+Generate exactly **one** self-contained English sentence for shadowing/dictation.
+Target: {level_label} learner.\n{level_style}
+Constraints:
+- Natural in daily/work/social context.
+- ~15 words (±5) for 初級/中級, up to 22–25 for 上級。
+- Provide clear semantics (no unresolved pronouns, no lists, no quotes).
+Return only the sentence.
 """
 
-# 問題文と回答を比較し、評価結果の生成を支持するプロンプトを作成
+
+# 機械採点(WER)を踏まえた評価（LLM採点）
 SYSTEM_TEMPLATE_EVALUATION = """
-    あなたは英語学習の専門家です。
-    以下の「LLMによる問題文」と「ユーザーによる回答文」を比較し、分析してください：
+あなたは英語学習の専門家です（対象レベル: {level_label}）。
+以下の情報をふまえて、人にわかりやすい**日本語中心**のフィードバックを行ってください。
 
-    【LLMによる問題文】
-    問題文：{llm_text}
 
-    【ユーザーによる回答文】
-    回答文：{user_text}
+[機械採点の参考値]
+- WER(Word Error Rate): {wer_percent:.1f}%
 
-    【分析項目】
-    1. 単語の正確性（誤った単語、抜け落ちた単語、追加された単語）
-    2. 文法的な正確性
-    3. 文の完成度
 
-    フィードバックは以下のフォーマットで日本語で提供してください：
+[語のアライン表(参考)]
+{diff_table}
 
-    【評価】 # ここで改行を入れる
-    ✓ 正確に再現できた部分 # 項目を複数記載
-    △ 改善が必要な部分 # 項目を複数記載
-    
-    【アドバイス】
-    次回の練習のためのポイント
 
-    ユーザーの努力を認め、前向きな姿勢で次の練習に取り組めるような励ましのコメントを含めてください。
+[LLMによる問題文]
+{llm_text}
+
+
+[ユーザーの回答]
+{user_text}
+
+
+# 出力フォーマット（Markdownで厳守）
+**総合スコア**: <0–100 点> # WERも勘案。ただし意味が通れば減点を抑える
+**評価理由(日本語)**:
+- 箇条書きで具体的に（語彙・語順・機能語）
+**語彙/文法の指摘(英語)**:
+- 'X' → 'Y' (reason)
+**模範解答(英語)**:
+> 書き換え例を1つ
+**次の練習アドバイス(日本語)**:
+- 改善のための1行アドバイス
 """
