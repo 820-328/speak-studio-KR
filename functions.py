@@ -36,15 +36,11 @@ except Exception:
 
 def _make_llm(model: Optional[str] = None, temperature: float = 0.3):
     model = model or ct.OPENAI_MODEL
-    # APIキー未設定時は失敗するので、呼び出し側でフォールバック
     return ChatOpenAI(model=model, temperature=temperature)
 
 
 def _content_to_text(content: Union[str, List[Dict[str, Any]], Any]) -> str:
-    """
-    LangChainの AIMessage.content は str か list[dict(type=..., ...)] の場合がある。
-    型警告を避けつつ安全に文字列へ。
-    """
+    """AIMessage.content が list の場合に安全に文字列へ変換"""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -67,12 +63,9 @@ def _content_to_text(content: Union[str, List[Dict[str, Any]], Any]) -> str:
 
 
 def chat_once(system_prompt: str, user_text: str, model: Optional[str] = None) -> str:
-    """
-    単発チャット生成。APIキー未設定時はローカル簡易応答にフォールバック。
-    """
+    """単発チャット。APIキー未設定時はローカル簡易応答へ"""
     if not os.getenv("OPENAI_API_KEY"):
         return f"(ローカル簡易応答) {user_text}"
-
     try:
         llm = _make_llm(model=model, temperature=0.3)
         prompt = ChatPromptTemplate.from_messages([
@@ -88,12 +81,9 @@ def chat_once(system_prompt: str, user_text: str, model: Optional[str] = None) -
 
 
 def translate_text(text: str, target_lang_label: str = "Japanese", model: Optional[str] = None) -> str:
-    """
-    LLMで翻訳（即時訳用）。APIキー未設定時は原文を返す。
-    """
+    """LLMで翻訳（即時訳用）。キー未設定時は原文"""
     if not os.getenv("OPENAI_API_KEY"):
         return text
-
     try:
         llm = _make_llm(model=model or ct.OPENAI_MODEL_MINI, temperature=0.0)
         prompt = ChatPromptTemplate.from_messages([
@@ -113,13 +103,10 @@ def get_lang_conf(lang_code: str) -> Dict[str, Any]:
 
 
 def stt_recognize_from_audio(audio_data, lang_code: str) -> str:
-    """
-    SpeechRecognition(Google) でSTT。lang_codeに応じて言語切替。
-    """
+    """SpeechRecognition(Google) STT"""
     conf = get_lang_conf(lang_code)
     r = sr.Recognizer()
     try:
-        # Pylanceのstubに recognize_google が載っていないため、型警告を抑制
         text = r.recognize_google(audio_data, language=conf["stt"])  # type: ignore[attr-defined]
         return text
     except Exception:
@@ -128,14 +115,11 @@ def stt_recognize_from_audio(audio_data, lang_code: str) -> str:
 
 # ---------- TTS ----------
 async def _edge_tts_bytes_async(text: str, voice: str, rate_pct: int) -> bytes:
-    """
-    Edge-TTS で音声生成（MP3）。rate_pctは -50～+50 を想定。
-    """
+    """Edge-TTS で音声生成（MP3）"""
     rate = f"{rate_pct:+d}%"
     communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate)  # type: ignore[name-defined]
     out = io.BytesIO()
     async for chunk in communicate.stream():
-        # chunk は TypedDict だが、非必須キーに直接アクセスすると型警告になるためガードする
         if isinstance(chunk, dict) and chunk.get("type") == "audio":
             data = chunk.get("data", b"")
             if isinstance(data, (bytes, bytearray)):
@@ -145,10 +129,10 @@ async def _edge_tts_bytes_async(text: str, voice: str, rate_pct: int) -> bytes:
 
 def tts_synthesize(text: str, lang_code: str, rate_pct: int = 0, prefer_edge: bool = True, edge_voice: Optional[str] = None) -> bytes:
     """
-    音声合成してバイトを返す（MP3推奨）。prefer_edge=True かつ Edge-TTSが利用可能ならそれを使用（速度調整可）。
-    それ以外は gTTS でフォールバック（速度調整は不可）。
+    音声合成（MP3バイトを返す）
+    - Edge-TTS優先（速度調整可）
+    - 失敗時は gTTS にフォールバック（固定速度）
     """
-    # Edge-TTS優先
     if prefer_edge and _HAS_EDGE_TTS:
         voices = get_lang_conf(lang_code).get("edge_voices", [])
         voice = edge_voice or (voices[0] if voices else None)
@@ -156,9 +140,7 @@ def tts_synthesize(text: str, lang_code: str, rate_pct: int = 0, prefer_edge: bo
             try:
                 return asyncio.run(_edge_tts_bytes_async(text, voice, rate_pct))
             except Exception:
-                pass  # 失敗時はgTTSへフォールバック
-
-    # gTTSフォールバック（速度調整不可）
+                pass
     conf = get_lang_conf(lang_code)
     tts = gTTS(text=text, lang=conf["tts"])
     buf = io.BytesIO()
@@ -171,12 +153,7 @@ def tts_synthesize(text: str, lang_code: str, rate_pct: int = 0, prefer_edge: bo
 _PUNCT_RE = re.compile(r"[^\w\s\uAC00-\uD7A3]", flags=re.UNICODE)
 
 def normalize_for_compare(s: str) -> str:
-    """
-    シャドーイング判定用のテキスト正規化（英語＆韓国語想定）。
-    - 大文字小文字/全角半角
-    - 句読点除去（ハングル範囲は保持）
-    - 連続空白の単一化
-    """
+    """シャドーイング比較用の簡易正規化"""
     s = unicodedata.normalize("NFC", s).lower().strip()
     s = _PUNCT_RE.sub("", s)
     s = re.sub(r"\s+", " ", s)
