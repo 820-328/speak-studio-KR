@@ -111,8 +111,7 @@ def stt_recognize_from_audio(audio_data, lang_code: str) -> str:
 # ---------- TTS ----------
 async def _edge_tts_bytes_async(text: str, voice: str, rate_pct: int) -> bytes:
     """
-    Edge-TTS で音声生成（MP3）。ライブラリ側に output_format 引数はないため、
-    形式はデフォルト（MP3相当）を使用します。
+    Edge-TTS で音声生成（MP3相当）。
     """
     rate = f"{rate_pct:+d}%"
     communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate)  # type: ignore[name-defined]
@@ -140,16 +139,16 @@ def tts_synthesize(
     rate_pct: int = 0,
     prefer_edge: bool = True,
     edge_voice: Optional[str] = None,
-    force_wav: bool = False,  # 互換のため保持（現状はMP3固定）
+    force_wav: bool = False,          # 互換のため残置（現状MP3固定）
+    force_gtts: bool = False,         # ← 追加：互換性優先でgTTSのみを使用
 ) -> Tuple[bytes, str]:
     """
     音声合成（bytes, mime）を返す
-    - Edge-TTS優先（MP3=audio/mpeg）
+    - Edge-TTS優先（audio/mpeg）
     - 無音/短尺(1KB未満)や例外時は gTTS に自動フォールバック（audio/mpeg）
-    - ※ edge-tts に output_format は無いため WAV 生成は未対応（将来対応検討）
+    - force_gtts=True なら常に gTTS を使用
     """
-    # Edge-TTS
-    if prefer_edge and _HAS_EDGE_TTS:
+    if not force_gtts and prefer_edge and _HAS_EDGE_TTS:
         voices = get_lang_conf(lang_code).get("edge_voices", [])
         voice = edge_voice or (voices[0] if voices else None)
         if voice:
@@ -160,7 +159,7 @@ def tts_synthesize(
             except Exception:
                 pass  # フォールバックへ
 
-    # gTTS フォールバック
+    # gTTS（確実にMP3生成）
     b = _gtts_bytes(text, lang_code)
     return b, "audio/mpeg"
 
