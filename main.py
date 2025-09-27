@@ -2,6 +2,7 @@
 """
 SpeakStudio (Streamlit)
 - スマホ互換: <audio> に WAV と MP3 を両方埋め込み（ブラウザが自動選択）
+- 録音: 通常は streamlit-mic-recorder、ダメなら WebRTC 録音（ベータ）に切替
 - gTTS強制 / WAV変換 / 代替プレーヤー（HTML直埋め）をサイドバーで切替
 - スクロール例文・ダークモード可読CSS・サイドバー案内
 """
@@ -10,6 +11,8 @@ from __future__ import annotations
 import io
 import difflib
 import base64
+import wave
+import numpy as np
 
 import streamlit as st
 from streamlit_mic_recorder import mic_recorder
@@ -109,7 +112,7 @@ with st.sidebar:
     }
 
     st.divider()
-    st.markdown('<div class="block note"><small class="help">鳴らない時は「WAVに変換」「gTTSを強制」「代替プレーヤー」をONに。</small></div>', unsafe_allow_html=True)
+    st.markdown('<div class="block note"><small class="help">録音できない場合は「WebRTC録音（ベータ）」をONに。Safariは録音形式の制約が厳しいため端末差が出ます。</small></div>', unsafe_allow_html=True)
 
 # ---------- ヘッダー ----------
 st.markdown(f"## {ct.APP_NAME}")
@@ -176,6 +179,65 @@ def synth_and_player(text: str, lang_code: str, file_stub: str = "speech"):
         mime, data = sources[0]
         st.audio(data, format=mime)
 
+# ---- WebRTC録音（ベータ）: 端末によっては mic_recorder が動かないための保険 ----
+def record_audio_webrtc_once() -> bytes | None:
+    try:
+        from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+        import av
+    except Exception:
+        st.warning("WebRTC録音を使うには 'streamlit-webrtc' と 'av' が必要です（requirements.txt に追加）。")
+        return None
+
+    rtc_conf = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
+    ctx = webrtc_streamer(
+        key="webrtc_rec",
+        mode=WebRtcMode.SENDONLY,  # クライアント→サーバへ送るだけ
+        audio_receiver_size=256,
+        media_stream_constraints={"video": False, "audio": True},
+        rtc_configuration=rtc_conf,
+    )
+
+    # 連続フレーム一時バッファ
+    if "webrtc_buf" not in st.session_state:
+        st.session_state["webrtc_buf"] = []
+        st.session_state["webrtc_rate"] = 48000
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.caption("🎙️ WebRTC録音（ベータ）を開始→Safari等の録音不具合の保険")
+    with col_b:
+        stop = st.button("⏹️ 録音を停止して保存", use_container_width=True)
+
+    if ctx.state.playing:
+        # 受信フレームを随時追記
+        frames = ctx.audio_receiver.get_frames(timeout=1)
+        for f in frames:
+            arr = f.to_ndarray(format="s16")  # 16bit PCM
+            # arr の shape は実装により (channels, samples) or (samples, channels)
+            if arr.ndim == 2:
+                if arr.shape[0] < arr.shape[1]:  # (channels, samples)
+                    mono = arr[0, :]
+                else:  # (samples, channels)
+                    mono = arr[:, 0]
+            else:
+                mono = arr
+            st.session_state["webrtc_buf"].append(mono.tobytes())
+            st.session_state["webrtc_rate"] = int(getattr(f, "sample_rate", 48000))
+
+    if stop and st.session_state["webrtc_buf"]:
+        # WAV にまとめる
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # s16
+            wf.setframerate(st.session_state["webrtc_rate"])
+            wf.writeframes(b"".join(st.session_state["webrtc_buf"]))
+        data = buf.getvalue()
+        st.session_state["webrtc_buf"] = []
+        return data
+
+    return None
+
 def show_translation_if_needed(source_text_ko: str):
     if st.session_state.get("lang") == "ko" and show_trans and source_text_ko.strip():
         jp = fn.translate_text(source_text_ko, target_lang_label="Japanese")
@@ -184,7 +246,7 @@ def show_translation_if_needed(source_text_ko: str):
 # ========== 1) Daily Chat ==========
 if st.session_state["mode"] == ct.ANSWER_MODE_DAILY:
     st.subheader("Daily Chat（フリートーク）")
-    st.markdown('<div class="block note">スマホで音が出ない場合はサイドバーの互換設定をONにしてください。</div>', unsafe_allow_html=True)
+    st.markdown('<div class="block note">スマホで音が出ない/録音できない場合はサイドバーの互換設定やWebRTC録音をお試しください。</div>', unsafe_allow_html=True)
 
     if "chat" not in st.session_state:
         st.session_state["chat"] = []
@@ -229,7 +291,8 @@ elif st.session_state["mode"] == ct.ANSWER_MODE_SHADOWING:
     with c2:
         repeat_n = st.number_input("回数（同じ文）", min_value=1, max_value=5, value=1, step=1)
     with c3:
-        st.write("　")
+        # 録音手段の選択（デフォは mic_recorder、動かないときはWebRTC）
+        use_webrtc = st.toggle("WebRTC録音（ベータ）を使う", value=False)
 
     sents = ct.SHADOWING_CORPUS_KO[level] if st.session_state["lang"] == "ko" else ct.SHADOWING_CORPUS_EN[level]
     st.markdown("#### 例文（30件）")
@@ -247,10 +310,16 @@ elif st.session_state["mode"] == ct.ANSWER_MODE_SHADOWING:
         if st.button("▶️ 合成音声を再生"):
             synth_and_player(target, st.session_state["lang"], file_stub=f"shadow_{level}_{idx}")
     with b2:
-        mic = mic_recorder(start_prompt="🎙️ 録音開始", stop_prompt="⏹️ 停止", just_once=True)
+        wav_bytes = None
+        if not use_webrtc:
+            mic = mic_recorder(start_prompt="🎙️ 録音開始", stop_prompt="⏹️ 停止",
+                               just_once=True, use_container_width=True, key=f"mic_{level}_{idx}")
+            if mic and "bytes" in mic:
+                wav_bytes = mic["bytes"]
+        else:
+            wav_bytes = record_audio_webrtc_once()
 
-    if mic and "bytes" in mic:
-        wav_bytes = mic["bytes"]
+    if wav_bytes:
         recognizer = sr.Recognizer()
         try:
             with sr.AudioFile(io.BytesIO(wav_bytes)) as source:
@@ -318,4 +387,3 @@ elif st.session_state["mode"] == ct.ANSWER_MODE_ROLEPLAY:
             else:
                 if st.button("▶️ 再生", key=f"play_rp_new_{len(st.session_state[key])}"):
                     synth_and_player(reply, "ko", file_stub=f"rp_{scenario['key']}_new")
-
