@@ -2,14 +2,13 @@
 """
 SpeakStudio (Streamlit)
 - Modes: Daily Chat / Shadowing / Roleplay
-- モバイル最適化: スクロールボックス/配色(ライト/ダーク)/サイドバー案内
+- モバイル：自動再生OFF既定＋各発話に「▶️再生」ボタン
+- スクロール例文・ダークモード可読CSS・サイドバー案内を含む
 """
 
 from __future__ import annotations
-import os
 import io
 import difflib
-from typing import List, Dict, Any, Optional
 
 import streamlit as st
 from streamlit_mic_recorder import mic_recorder
@@ -18,48 +17,41 @@ import speech_recognition as sr
 import constants as ct
 import functions as fn
 
-# ---------- ページ設定（スマホで分かりにくいので可能ならサイドバーを初期表示） ----------
-st.set_page_config(
-    page_title=ct.APP_NAME,
-    page_icon="🎧",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# ---------- ページ設定 ----------
+st.set_page_config(page_title=ct.APP_NAME, page_icon="🎧", layout="wide")
 
-# ---------- CSS：ライト/ダーク両対応 + スクロールボックス + モバイル案内 ----------
+# ---------- CSS（可読性＆モバイル案内＆スクロールリスト） ----------
 st.markdown("""
 <style>
-/* ベース配色：ライト */
-html, body, .stApp { background-color: #ffffff; color: #111111; }
-.block { background:#ffffff; color:#111111; border:1px solid #e5e7eb; padding:12px 14px; border-radius:14px; }
-.note  { background:#f7faff; color:#0f172a; border:1px solid #cfe3ff; }
-.tran  { background:#fff8e6; color:#1f2937; border:1px solid #ffd28a; }
+:root { --radius: 14px; }
 
-/* ダークモード検出時の上書き（スマホのシステムダーク対策） */
-@media (prefers-color-scheme: dark){
-  html, body, .stApp { background-color: #0e1117 !important; color: #f5f5f5 !important; }
-  .block { background:#111827; color:#f9fafb; border-color:#374151; }
-  .note  { background:#0b132b; color:#e5e7eb; border-color:#1f3b73; }
-  .tran  { background:#2d1b0f; color:#fef3c7; border-color:#a16207; }
+/* 共通ボックス */
+.block { border: 1px solid #e5e7eb; padding: 12px 14px; border-radius: var(--radius); background: #ffffff; color: #111; }
+.note  { background: #f7faff; border-color: #cfe3ff; color: #111; }
+.tran  { background: #fff8e6; border-color: #ffd28a; color: #111; }
+small.help { color: #333; }
+
+/* モバイル向けヒント（幅が狭い時だけ表示） */
+.mobile-tip { display:none; margin: 8px 0 12px; padding:10px 12px; border:1px dashed #6aa0ff; border-radius:12px; background:#eef5ff; color:#0b1f3a; }
+@media (max-width: 768px) {
+  .mobile-tip { display:block; }
 }
 
-/* 30件リスト用のスクロール枠（モバイルで全部見える） */
-.scrollbox {
-  max-height: 60vh; overflow: auto; padding: 10px 12px;
-  background: inherit; color: inherit; border:1px dashed #cbd5e1; border-radius:12px;
+/* 例文のスクロールボックス：30件でも見切れない */
+.scroll-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 8px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  color: #111;
 }
 
-/* モバイル専用ヒント（≡ を案内） */
-.mobile-hint { display:none; }
-@media (max-width: 640px){
-  .mobile-hint {
-    display:block; margin: 6px 0 10px 0;
-    background:#fffbe6; color:#111827; border:1px solid #ffd666; border-radius:12px;
-    padding:8px 10px; font-size:0.95rem;
-  }
-  @media (prefers-color-scheme: dark){
-    .mobile-hint { background:#332d09; color:#fef3c7; border-color:#a27d00; }
-  }
+/* ダークテーマ時の読みやすさ確保 */
+@media (prefers-color-scheme: dark) {
+  .block, .note, .tran, .scroll-list { color: #111; background: #fff; border-color: #e5e7eb; }
+  small.help { color: #222; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -93,6 +85,10 @@ with st.sidebar:
     show_trans = st.checkbox("即時訳（韓→日）を表示", value=True,
                              help="アシスタントの韓国語出力を日本語に翻訳して下段に表示します。韓国語モードで有効。")
 
+    # ★ 音声自動再生（iOS/Androidの自動再生ブロック対策：既定OFF）
+    autoplay = st.checkbox("音声の自動再生（iOSはOFF推奨）", value=False)
+    st.session_state["autoplay"] = autoplay
+
     st.divider()
 
     # TTS 設定
@@ -104,12 +100,12 @@ with st.sidebar:
     st.session_state["tts_cfg"] = {"prefer_edge": prefer_edge, "rate": rate, "edge_voice": edge_voice}
 
     st.divider()
-    st.markdown('<div class="block note"><small>Edge-TTSが使えない場合は自動でgTTSにフォールバックします。</small></div>', unsafe_allow_html=True)
+    st.markdown('<div class="block note"><small class="help">Edge-TTSが使えない/無音のときは自動でgTTSにフォールバックします。</small></div>', unsafe_allow_html=True)
 
-# ---------- ヘッダー & モバイル案内 ----------
+# ---------- ヘッダー（モバイル向け案内つき） ----------
 st.markdown(f"## {ct.APP_NAME}")
-st.caption("英語 / 韓国語の会話練習・シャドーイング・ロールプレイ")
-st.markdown('<div class="mobile-hint">📱 スマホでは左上の <b>≡</b> をタップしてサイドバー（言語・設定）を開けます。</div>', unsafe_allow_html=True)
+st.markdown('<div class="mobile-tip">📱 スマホの方へ：左上の<strong>≡（メニュー）</strong>をタップするとサイドバーが開きます。言語やモード切替はサイドバーで行います。</div>', unsafe_allow_html=True)
+st.markdown('<div class="block note">英語 / 韓国語の会話練習・シャドーイング・ロールプレイ</div>', unsafe_allow_html=True)
 
 # ---------- 共通ヘルパ ----------
 def say_and_player(text: str, lang_code: str):
@@ -118,6 +114,7 @@ def say_and_player(text: str, lang_code: str):
         text, lang_code=lang_code,
         rate_pct=cfg["rate"], prefer_edge=cfg["prefer_edge"], edge_voice=cfg["edge_voice"]
     )
+    # bytesを確実にHTML5 audioに渡す
     st.audio(mp3_bytes, format="audio/mp3")
 
 def show_translation_if_needed(source_text_ko: str):
@@ -128,17 +125,26 @@ def show_translation_if_needed(source_text_ko: str):
 # ========== 1) Daily Chat ==========
 if mode == ct.ANSWER_MODE_DAILY:
     st.subheader("Daily Chat（フリートーク）")
-    st.markdown('<div class="block note">選択した言語のみで応答し、音声も自動再生します。</div>', unsafe_allow_html=True)
+    st.markdown('<div class="block note">言語はサイドバーで切替。選択言語のみで応答します。スマホでは各発話の下の「▶️ 再生」をタップしてください。</div>', unsafe_allow_html=True)
 
+    # チャット履歴
     if "chat" not in st.session_state:
         st.session_state["chat"] = []
 
-    for who, text in st.session_state["chat"]:
+    for i, (who, text) in enumerate(st.session_state["chat"]):
         with st.chat_message(who):
             st.write(text)
             if who == "assistant" and lang == "ko":
                 show_translation_if_needed(text)
+                # 履歴発話にも手動再生ボタン
+                if st.button("▶️ 再生", key=f"play_hist_{i}"):
+                    say_and_player(text, lang)
+            elif who == "assistant":
+                # 英語側にも統一で再生ボタン
+                if st.button("▶️ 再生", key=f"play_hist_{i}_en"):
+                    say_and_player(text, lang)
 
+    # 入力
     user_text = st.chat_input("メッセージを入力（日本語/英語/韓国語 OK）")
     if user_text:
         st.session_state["chat"].append(("user", user_text))
@@ -153,7 +159,13 @@ if mode == ct.ANSWER_MODE_DAILY:
             st.write(reply)
             if lang == "ko":
                 show_translation_if_needed(reply)
-            say_and_player(reply, lang)
+
+            # 自動再生 or 手動ボタン
+            if st.session_state.get("autoplay", False):
+                say_and_player(reply, lang)
+            else:
+                if st.button("▶️ 再生", key=f"play_new_{len(st.session_state['chat'])}"):
+                    say_and_player(reply, lang)
 
 # ========== 2) Shadowing ==========
 elif mode == ct.ANSWER_MODE_SHADOWING:
@@ -167,25 +179,14 @@ elif mode == ct.ANSWER_MODE_SHADOWING:
     with cols[2]:
         st.write("　")
 
-    # 文リスト
-    if lang == "ko":
-        sents = ct.SHADOWING_CORPUS_KO[level]
-    else:
-        sents = ct.SHADOWING_CORPUS_EN[level]
-
-    total = len(sents)
-    st.markdown(f"#### 例文（{total}件）")
-
-    # 30件すべて見えるスクロールボックス表示
-    list_html = "<br>".join([f"{i}. {s}" for i, s in enumerate(sents, 1)])
-    st.markdown(f'<div class="scrollbox">{list_html}</div>', unsafe_allow_html=True)
-
-    # constants.py が古いと 30件に満たない可能性 → 目で分かるよう注意表示
-    if total < 30:
-        st.warning(f"このレベルの例文は {total} 件です。30件未満の場合は constants.py のコーパスが古い可能性があります。")
+    # 文リスト（30件）スクロール表示
+    sents = ct.SHADOWING_CORPUS_KO[level] if lang == "ko" else ct.SHADOWING_CORPUS_EN[level]
+    st.markdown("#### 例文（30件）")
+    list_html = "<div class='scroll-list'><ol>" + "".join(f"<li>{s}</li>" for s in sents) + "</ol></div>"
+    st.markdown(list_html, unsafe_allow_html=True)
 
     st.markdown("---")
-    idx = st.number_input("練習する文番号", min_value=1, max_value=total, value=1, step=1)
+    idx = st.number_input("練習する文番号", min_value=1, max_value=len(sents), value=1, step=1)
     target = sents[idx - 1]
 
     st.markdown("##### 目標文")
@@ -214,6 +215,7 @@ elif mode == ct.ANSWER_MODE_SHADOWING:
         st.markdown("##### あなたの発話（STT）")
         st.write(transcribed if transcribed else "(聞き取れませんでした)")
 
+        # 類似度スコア
         ref = fn.normalize_for_compare(target)
         got = fn.normalize_for_compare(transcribed)
         ratio = difflib.SequenceMatcher(None, ref, got).ratio()
@@ -221,6 +223,7 @@ elif mode == ct.ANSWER_MODE_SHADOWING:
         st.markdown(f"**スコア：{score} / 100**")
 
         if lang == "ko":
+            st.markdown("##### 意味（参考）")
             show_translation_if_needed(target)
 
         if repeat_n > 1:
@@ -241,11 +244,13 @@ elif mode == ct.ANSWER_MODE_ROLEPLAY:
     with st.expander("シナリオ開始例（韓国語）", expanded=False):
         st.markdown(f"- 例: {scenario['opening_user_ko']}")
 
-    for who, text in st.session_state[key]:
+    for i, (who, text) in enumerate(st.session_state[key]):
         with st.chat_message(who):
             st.write(text)
             if who == "assistant":
                 show_translation_if_needed(text)
+                if st.button("▶️ 再生", key=f"play_rp_hist_{i}"):
+                    say_and_player(text, "ko")
 
     user_text = st.chat_input("セリフを入力（日本語/韓国語）")
     if user_text:
@@ -261,4 +266,9 @@ elif mode == ct.ANSWER_MODE_ROLEPLAY:
         with st.chat_message("assistant"):
             st.write(reply)
             show_translation_if_needed(reply)
-            say_and_player(reply, "ko")
+
+            if st.session_state.get("autoplay", False):
+                say_and_player(reply, "ko")
+            else:
+                if st.button("▶️ 再生", key=f"play_rp_new_{len(st.session_state[key])}"):
+                    say_and_player(reply, "ko")
