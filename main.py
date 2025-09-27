@@ -2,9 +2,7 @@
 """
 SpeakStudio (Streamlit)
 - Modes: Daily Chat / Shadowing / Roleplay
-- 韓国語モード＝英語モードと同等挙動（機能パリティ）
-- フリートークでは韓国語応答＋音声再生（言語切替に追随）
-- シャドーイング：英語・韓国語とも各レベル30文
+- モバイル最適化: スクロールボックス/配色(ライト/ダーク)/サイドバー案内
 """
 
 from __future__ import annotations
@@ -15,22 +13,54 @@ from typing import List, Dict, Any, Optional
 
 import streamlit as st
 from streamlit_mic_recorder import mic_recorder
+import speech_recognition as sr
 
 import constants as ct
 import functions as fn
-import speech_recognition as sr
 
-# ---------- ページ設定 ----------
-st.set_page_config(page_title=ct.APP_NAME, page_icon="🎧", layout="wide")
+# ---------- ページ設定（スマホで分かりにくいので可能ならサイドバーを初期表示） ----------
+st.set_page_config(
+    page_title=ct.APP_NAME,
+    page_icon="🎧",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# ---------- CSS ----------
+# ---------- CSS：ライト/ダーク両対応 + スクロールボックス + モバイル案内 ----------
 st.markdown("""
 <style>
-:root { --radius: 14px; }
-.block { border: 1px solid #ddd; padding: 12px 14px; border-radius: var(--radius); }
-.note { background: #f7faff; border-color: #cfe3ff; }
-.tran { background: #fff8e6; border-color: #ffd28a; }
-small.help { color: #666; }
+/* ベース配色：ライト */
+html, body, .stApp { background-color: #ffffff; color: #111111; }
+.block { background:#ffffff; color:#111111; border:1px solid #e5e7eb; padding:12px 14px; border-radius:14px; }
+.note  { background:#f7faff; color:#0f172a; border:1px solid #cfe3ff; }
+.tran  { background:#fff8e6; color:#1f2937; border:1px solid #ffd28a; }
+
+/* ダークモード検出時の上書き（スマホのシステムダーク対策） */
+@media (prefers-color-scheme: dark){
+  html, body, .stApp { background-color: #0e1117 !important; color: #f5f5f5 !important; }
+  .block { background:#111827; color:#f9fafb; border-color:#374151; }
+  .note  { background:#0b132b; color:#e5e7eb; border-color:#1f3b73; }
+  .tran  { background:#2d1b0f; color:#fef3c7; border-color:#a16207; }
+}
+
+/* 30件リスト用のスクロール枠（モバイルで全部見える） */
+.scrollbox {
+  max-height: 60vh; overflow: auto; padding: 10px 12px;
+  background: inherit; color: inherit; border:1px dashed #cbd5e1; border-radius:12px;
+}
+
+/* モバイル専用ヒント（≡ を案内） */
+.mobile-hint { display:none; }
+@media (max-width: 640px){
+  .mobile-hint {
+    display:block; margin: 6px 0 10px 0;
+    background:#fffbe6; color:#111827; border:1px solid #ffd666; border-radius:12px;
+    padding:8px 10px; font-size:0.95rem;
+  }
+  @media (prefers-color-scheme: dark){
+    .mobile-hint { background:#332d09; color:#fef3c7; border-color:#a27d00; }
+  }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -74,11 +104,12 @@ with st.sidebar:
     st.session_state["tts_cfg"] = {"prefer_edge": prefer_edge, "rate": rate, "edge_voice": edge_voice}
 
     st.divider()
-    st.markdown('<div class="block note"><small class="help">Edge-TTSが使えない場合は自動でgTTSにフォールバックします。</small></div>', unsafe_allow_html=True)
+    st.markdown('<div class="block note"><small>Edge-TTSが使えない場合は自動でgTTSにフォールバックします。</small></div>', unsafe_allow_html=True)
 
-# ---------- ヘッダー ----------
+# ---------- ヘッダー & モバイル案内 ----------
 st.markdown(f"## {ct.APP_NAME}")
 st.caption("英語 / 韓国語の会話練習・シャドーイング・ロールプレイ")
+st.markdown('<div class="mobile-hint">📱 スマホでは左上の <b>≡</b> をタップしてサイドバー（言語・設定）を開けます。</div>', unsafe_allow_html=True)
 
 # ---------- 共通ヘルパ ----------
 def say_and_player(text: str, lang_code: str):
@@ -97,9 +128,8 @@ def show_translation_if_needed(source_text_ko: str):
 # ========== 1) Daily Chat ==========
 if mode == ct.ANSWER_MODE_DAILY:
     st.subheader("Daily Chat（フリートーク）")
-    st.markdown('<div class="block note">言語はサイドバーで切替。選択言語のみで応答し、音声も自動再生します。</div>', unsafe_allow_html=True)
+    st.markdown('<div class="block note">選択した言語のみで応答し、音声も自動再生します。</div>', unsafe_allow_html=True)
 
-    # チャット履歴
     if "chat" not in st.session_state:
         st.session_state["chat"] = []
 
@@ -109,14 +139,12 @@ if mode == ct.ANSWER_MODE_DAILY:
             if who == "assistant" and lang == "ko":
                 show_translation_if_needed(text)
 
-    # 入力
     user_text = st.chat_input("メッセージを入力（日本語/英語/韓国語 OK）")
     if user_text:
         st.session_state["chat"].append(("user", user_text))
         with st.chat_message("user"):
             st.write(user_text)
 
-        # 選択言語でのみ応答
         system_prompt = ct.system_prompt_for(ct.ANSWER_MODE_DAILY, lang)
         reply = fn.chat_once(system_prompt, user_text, model=ct.OPENAI_MODEL)
 
@@ -125,7 +153,6 @@ if mode == ct.ANSWER_MODE_DAILY:
             st.write(reply)
             if lang == "ko":
                 show_translation_if_needed(reply)
-            # 選択言語で音声再生
             say_and_player(reply, lang)
 
 # ========== 2) Shadowing ==========
@@ -140,18 +167,25 @@ elif mode == ct.ANSWER_MODE_SHADOWING:
     with cols[2]:
         st.write("　")
 
-    # 文リスト（30件）
+    # 文リスト
     if lang == "ko":
         sents = ct.SHADOWING_CORPUS_KO[level]
     else:
         sents = ct.SHADOWING_CORPUS_EN[level]
 
-    st.markdown("#### 例文（30件）")
-    for i, s in enumerate(sents, 1):
-        st.write(f"{i}. {s}")
+    total = len(sents)
+    st.markdown(f"#### 例文（{total}件）")
+
+    # 30件すべて見えるスクロールボックス表示
+    list_html = "<br>".join([f"{i}. {s}" for i, s in enumerate(sents, 1)])
+    st.markdown(f'<div class="scrollbox">{list_html}</div>', unsafe_allow_html=True)
+
+    # constants.py が古いと 30件に満たない可能性 → 目で分かるよう注意表示
+    if total < 30:
+        st.warning(f"このレベルの例文は {total} 件です。30件未満の場合は constants.py のコーパスが古い可能性があります。")
 
     st.markdown("---")
-    idx = st.number_input("練習する文番号", min_value=1, max_value=len(sents), value=1, step=1)
+    idx = st.number_input("練習する文番号", min_value=1, max_value=total, value=1, step=1)
     target = sents[idx - 1]
 
     st.markdown("##### 目標文")
@@ -180,7 +214,6 @@ elif mode == ct.ANSWER_MODE_SHADOWING:
         st.markdown("##### あなたの発話（STT）")
         st.write(transcribed if transcribed else "(聞き取れませんでした)")
 
-        # 類似度スコア
         ref = fn.normalize_for_compare(target)
         got = fn.normalize_for_compare(transcribed)
         ratio = difflib.SequenceMatcher(None, ref, got).ratio()
@@ -201,7 +234,6 @@ elif mode == ct.ANSWER_MODE_ROLEPLAY:
     idx = st.selectbox("シナリオ", list(range(len(labels))), format_func=lambda i: labels[i], index=0)
     scenario = ct.ROLEPLAY_SCENARIOS_KO[idx]
 
-    # 履歴キー
     key = f"rp_{scenario['key']}"
     if key not in st.session_state:
         st.session_state[key] = []
