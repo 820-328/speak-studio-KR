@@ -3,3 +3,6 @@ streamlit-mic-recorder
 SpeechRecognition
 gTTS
 openai>=1.44.0
+langchain-openai
+edge-tts
+python-dotenv
