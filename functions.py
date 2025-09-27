@@ -1,164 +1,183 @@
 # -*- coding: utf-8 -*-
 """
-共通ユーティリティ群：
-- LLM呼び出し（OpenAI）
-- 音声合成（gTTS→pyttsx3→テキストの順でフォールバック）
-- 文字起こし（SpeechRecognition があれば使用）
-- 定数の安全フォールバック
+SpeakStudio functions:
+- LLM呼び出し（LangChain OpenAI）
+- 翻訳ユーティリティ（即時訳ON時に使用）
+- STT（SpeechRecognition）
+- TTS（Edge-TTS優先、無ければgTTS）、速度調整
+- テキスト正規化（比較用）
 """
+
 from __future__ import annotations
-
-import importlib.util
+import io
 import os
-import uuid
-import importlib
-from typing import Optional, Tuple, Any
+import re
+import unicodedata
+import asyncio
+from typing import Optional, List, Dict, Any, Union
 
-# --- 安全に constants を読む（無くても動く） ---
+import constants as ct
+
+# LLM（LangChain OpenAI）
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+
+# STT / TTS
+import speech_recognition as sr
+from gtts import gTTS
+
+# Edge-TTS は任意（あれば高品質＆速度調整）
 try:
-    import constants as ct  # type: ignore
+    import edge_tts  # type: ignore
+    _HAS_EDGE_TTS = True
 except Exception:
-    ct = None  # フォールバック
+    _HAS_EDGE_TTS = False
 
-# 既定値（constants.py に同名定数があればそちらを優先）
-APP_NAME: str = getattr(ct, "APP_NAME", "English Conversation App")
-AUDIO_OUTPUT_DIR: str = getattr(ct, "AUDIO_OUTPUT_DIR", "audio_outputs")
-VOICE_LANG: str = getattr(ct, "VOICE_LANG", "en")  # gTTSのlangコード
-OPENAI_MODEL: str = getattr(ct, "OPENAI_MODEL", "gpt-4o-mini")
-SYSTEM_PROMPT_DAILY = getattr(
-    ct,
-    "SYSTEM_PROMPT_DAILY",
-    "You are a friendly English conversation partner. Keep replies concise and natural."
-)
-SYSTEM_PROMPT_SHADOWING = getattr(
-    ct,
-    "SYSTEM_PROMPT_SHADOWING",
-    "Provide a short, natural English sentence (10-20 words) suitable for shadowing practice."
-)
-SYSTEM_PROMPT_DICTATION = getattr(
-    ct,
-    "SYSTEM_PROMPT_DICTATION",
-    "Provide a short, natural English sentence (8-15 words) for dictation. Avoid punctuation-heavy text."
-)
 
-# --- OpenAI SDK（1.x系） ---
-_openai_client = None
-def _get_openai_client():
-    global _openai_client
-    if _openai_client is not None:
-        return _openai_client
+def _make_llm(model: Optional[str] = None, temperature: float = 0.3):
+    model = model or ct.OPENAI_MODEL
+    # APIキー未設定時は失敗するので、呼び出し側でフォールバック
+    return ChatOpenAI(model=model, temperature=temperature)
+
+
+def _content_to_text(content: Union[str, List[Dict[str, Any]], Any]) -> str:
+    """
+    LangChainの AIMessage.content は str か list[dict(type=..., ...)] の場合がある。
+    Pylanceの型警告を避けつつ安全に文字列へ。
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts: List[str] = []
+        for part in content:
+            if isinstance(part, dict):
+                # OpenAIのツール出力等を想定。type=="text" を優先的に拾う。
+                t = part.get("text")
+                if isinstance(t, str):
+                    texts.append(t)
+                else:
+                    # 念のため他タイプも文字列化
+                    try:
+                        texts.append(str(t) if t is not None else "")
+                    except Exception:
+                        pass
+        return "\n".join([t for t in texts if t]).strip()
+    # 不明タイプは素直に文字列化
     try:
-        from openai import OpenAI  # pip install openai>=1.0
-        _openai_client = OpenAI()
-        return _openai_client
+        return str(content)
     except Exception:
-        return None
+        return ""
 
-def call_llm(user_text: str, mode: str = "daily") -> str:
-    """
-    OpenAIのChat Completionsで短い応答を返す。
-    OpenAI SDKが使えない場合は簡易エコーバック。
-    """
-    system = {
-        "daily": SYSTEM_PROMPT_DAILY,
-        "shadowing": SYSTEM_PROMPT_SHADOWING,
-        "dictation": SYSTEM_PROMPT_DICTATION,
-    }.get(mode, SYSTEM_PROMPT_DAILY)
 
-    client = _get_openai_client()
-    if client is None:
-        return f"(fallback reply) [{mode}] {user_text}"
+def chat_once(system_prompt: str, user_text: str, model: Optional[str] = None) -> str:
+    """
+    単発チャット生成。APIキー未設定時はローカル簡易応答にフォールバック。
+    """
+    if not os.getenv("OPENAI_API_KEY"):
+        return f"(ローカル簡易応答) {user_text}"
 
     try:
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user_text},
-            ],
-            temperature=0.7,
-        )
-        return (resp.choices[0].message.content or "").strip()
+        llm = _make_llm(model=model, temperature=0.3)
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("user", "{u}"),
+        ])
+        chain = prompt | llm
+        out = chain.invoke({"u": user_text})
+        text = _content_to_text(getattr(out, "content", out))
+        return text.strip()
     except Exception as e:
-        return f"(LLM error) {e}"
+        return f"(LLMエラー) {e}"
 
-# --- ファイル系 ---
-def ensure_audio_dir(path: Optional[str] = None) -> str:
-    out = path or AUDIO_OUTPUT_DIR
-    os.makedirs(out, exist_ok=True)
-    return out
 
-def save_uploaded_audio(file_bytes: bytes, suffix: str = ".wav") -> str:
-    """アップロード音声を保存してパスを返す"""
-    out_dir = ensure_audio_dir()
-    fname = f"input_{uuid.uuid4().hex}{suffix}"
-    fpath = os.path.join(out_dir, fname)
-    with open(fpath, "wb") as f:
-        f.write(file_bytes)
-    return fpath
-
-# --- 動的 import ヘルパ ---
-def _optional_import(module_name: str) -> Optional[Any]:
-    """存在すればモジュールを返し、無ければ None。Pylanceに怒られない方式。"""
-    try:
-        spec = importlib.util.find_spec(module_name)
-        if spec is None:
-            return None
-        return importlib.import_module(module_name)
-    except Exception:
-        return None
-
-# --- 文字起こし（任意ライブラリがあれば利用） ---
-def transcribe_audio(audio_path: str) -> str:
+def translate_text(text: str, target_lang_label: str = "Japanese", model: Optional[str] = None) -> str:
     """
-    SpeechRecognitionがあれば英語で簡易文字起こし。
-    無ければ空文字を返す（UI側で扱えるようにする）。
+    LLMで翻訳（即時訳用）。APIキー未設定時は原文を返す。
     """
-    sr = _optional_import("speech_recognition")
-    if sr is None:
-        return ""
+    if not os.getenv("OPENAI_API_KEY"):
+        return text
+
     try:
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(audio_path) as source:
-            audio = recognizer.record(source)
-        try:
-            text = recognizer.recognize_google(audio, language="en-US")
-            return text
-        except Exception:
-            return ""
+        llm = _make_llm(model=model or ct.OPENAI_MODEL_MINI, temperature=0.0)
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a precise translator. Return only the translated text without explanations."),
+            ("user", "Translate to {tlang}: {src}"),
+        ])
+        chain = prompt | llm
+        out = chain.invoke({"tlang": target_lang_label, "src": text})
+        t = _content_to_text(getattr(out, "content", out))
+        return t.strip()
+    except Exception as e:
+        return f"(翻訳エラー) {e}"
+
+
+def get_lang_conf(lang_code: str) -> Dict[str, Any]:
+    return ct.LANGS.get(lang_code, ct.LANGS[ct.DEFAULT_LANG])
+
+
+def stt_recognize_from_audio(audio_data, lang_code: str) -> str:
+    """
+    SpeechRecognition(Google) でSTT。lang_codeに応じて言語切替。
+    """
+    conf = get_lang_conf(lang_code)
+    r = sr.Recognizer()
+    try:
+        # Pylanceのstubに recognize_google が載っていないため、型警告を抑制
+        text = r.recognize_google(audio_data, language=conf["stt"])  # type: ignore[attr-defined]
+        return text
     except Exception:
         return ""
 
-# --- 音声合成（gTTS→pyttsx3→テキスト） ---
-def synthesize_speech(text: str, lang: Optional[str] = None) -> Tuple[Optional[str], str]:
+
+# ---------- TTS ----------
+async def _edge_tts_bytes_async(text: str, voice: str, rate_pct: int) -> bytes:
     """
-    指定テキストを音声ファイルにし、(音声ファイルパス, 実際に使用した方法) を返す。
-    失敗時は (None, reason) を返す。
+    Edge-TTS で音声生成（MP3）。rate_pctは -50～+50 を想定。
     """
-    lang = lang or VOICE_LANG
-    out_dir = ensure_audio_dir()
+    rate = f"{rate_pct:+d}%"
+    communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate)  # type: ignore[name-defined]
+    out = io.BytesIO()
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            out.write(chunk["data"])
+    return out.getvalue()
 
-    # 1) gTTS（mp3）
-    gtts = _optional_import("gtts")
-    if gtts is not None:
-        try:
-            mp3_path = os.path.join(out_dir, f"tts_{uuid.uuid4().hex}.mp3")
-            gtts.gTTS(text=text, lang=lang).save(mp3_path)
-            return mp3_path, "gTTS"
-        except Exception:
-            pass
 
-    # 2) pyttsx3（wav）
-    pyttsx3 = _optional_import("pyttsx3")
-    if pyttsx3 is not None:
-        try:
-            engine = pyttsx3.init()
-            wav_path = os.path.join(out_dir, f"tts_{uuid.uuid4().hex}.wav")
-            engine.save_to_file(text, wav_path)
-            engine.runAndWait()
-            return wav_path, "pyttsx3"
-        except Exception:
-            pass
+def tts_synthesize(text: str, lang_code: str, rate_pct: int = 0, prefer_edge: bool = True, edge_voice: Optional[str] = None) -> bytes:
+    """
+    音声合成してバイトを返す（MP3推奨）。prefer_edge=True かつ Edge-TTSが利用可能ならそれを使用（速度調整可）。
+    それ以外は gTTS でフォールバック（速度調整は不可）。
+    """
+    # Edge-TTS優先
+    if prefer_edge and _HAS_EDGE_TTS:
+        voices = get_lang_conf(lang_code).get("edge_voices", [])
+        voice = edge_voice or (voices[0] if voices else None)
+        if voice:
+            try:
+                return asyncio.run(_edge_tts_bytes_async(text, voice, rate_pct))
+            except Exception:
+                pass  # 失敗時はgTTSへフォールバック
 
-    # 3) フォールバック（音声生成不可）
-    return None, "unavailable"
+    # gTTSフォールバック（速度調整不可）
+    conf = get_lang_conf(lang_code)
+    tts = gTTS(text=text, lang=conf["tts"])
+    buf = io.BytesIO()
+    tts.write_to_fp(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+# ---------- 正規化（比較用） ----------
+_PUNCT_RE = re.compile(r"[^\w\s\uAC00-\uD7A3]", flags=re.UNICODE)
+
+def normalize_for_compare(s: str) -> str:
+    """
+    シャドーイング判定用のテキスト正規化（英語＆韓国語想定）。
+    - 大文字小文字/全角半角
+    - 句読点除去（ハングル範囲は保持）
+    - 連続空白の単一化
+    """
+    s = unicodedata.normalize("NFC", s).lower().strip()
+    s = _PUNCT_RE.sub("", s)
+    s = re.sub(r"\s+", " ", s)
+    return s

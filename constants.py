@@ -1,91 +1,123 @@
-APP_NAME = "生成AI英会話アプリ"
+# -*- coding: utf-8 -*-
+"""
+SpeakStudio constants
+- Languages, voices, prompts, corpora, scenarios
+"""
 
+APP_NAME = "SpeakStudio"
 
-# 難易度ごとのスタイル指示（プロンプトにインライン展開）
-LEVEL_STYLE = {
-"初級者": (
-"Use CEFR A2-level English. Keep grammar simple (present/past, basic modals). "
-"Prefer 8-15 words per sentence. Avoid idioms/slang. Slow pace."
-),
-"中級者": (
-"Use CEFR B1–B2 English. Natural expressions and some phrasal verbs. "
-"Prefer 12–20 words per sentence. Allow subordinate clauses."
-),
-"上級者": (
-"Use CEFR C1 English. Nuanced vocabulary and complex structures. "
-"Prefer 15–25 words per sentence. Encourage idioms and register shifts when apt."
-),
+# 利用モード
+ANSWER_MODE_DAILY = "daily_chat"
+ANSWER_MODE_SHADOWING = "shadowing"
+ANSWER_MODE_ROLEPLAY = "roleplay"
+
+# 対応言語（英語は従来通り保持、今回は韓国語中心＋訳は日本語）
+LANGS = {
+    "en": {
+        "label": "英語",
+        "stt": "en-US",
+        "tts": "en",
+        "prompt_name": "English",
+        "edge_voices": ["en-US-JennyNeural", "en-US-GuyNeural"],
+    },
+    "ko": {
+        "label": "韓国語",
+        "stt": "ko-KR",
+        "tts": "ko",
+        "prompt_name": "Korean",
+        "edge_voices": ["ko-KR-SunHiNeural", "ko-KR-HyunsuNeural"],
+    },
 }
 
+DEFAULT_LANG = "ko"  # 今回は韓国語練習をデフォルトに
 
-# 英会話：毎ターンの出力を定型化（曖昧さを排除）
-SYSTEM_TEMPLATE_BASIC_CONVERSATION = """
-You are a conversational English tutor for a {level_label} learner.
-{level_style}
+# LLMモデル名（環境に合わせて変更可）
+OPENAI_MODEL = "gpt-5"          # 高性能
+OPENAI_MODEL_MINI = "gpt-5-mini"  # 軽量
 
+# シャドーイング用：英語（サンプル最小）
+SHADOWING_CORPUS_EN = {
+    "easy": [
+        "Hello, nice to meet you.",
+        "Could you speak more slowly, please?",
+        "Where are you from?",
+    ],
+    "normal": [
+        "I have been studying English more seriously these days.",
+        "Could you recommend a good place to eat around here?",
+    ],
+    "hard": [
+        "We should evaluate the cost-effectiveness from a long-term perspective.",
+        "Without proper data quality management, it is hard to trust the metrics.",
+    ],
+}
 
-Rules:
-- Keep the conversation flowing naturally.
-- When the user makes mistakes, correct them gently and explicitly.
-- Output in **exactly** this 3-part format, every time:
+# シャドーイング用：韓国語（本命）
+SHADOWING_CORPUS_KO = {
+    "easy": [
+        "안녕하세요. 처음 뵙겠습니다.",
+        "천천히 말씀해 주세요.",
+        "사진 찍어도 될까요?",
+        "얼마인가요?",
+        "감사합니다. 좋은 하루 되세요.",
+    ],
+    "normal": [
+        "요즘 한국어를 열심히 공부하고 있어요.",
+        "추천해 주실만한 맛집이 있을까요?",
+        "예약을 변경하고 싶은데 가능할까요?",
+        "연락이 늦어서 죄송합니다.",
+        "자료를 검토한 후에 다시 연락드릴게요.",
+    ],
+    "hard": [
+        "장기적인 관점에서 비용 대비 효율을 면밀히 검토해야 합니다.",
+        "사용자 피드백을 반영해 우선순위를 조정하는 것이 중요합니다.",
+        "데이터 품질 관리 없이는 신뢰할 수 있는 지표를 얻기 어렵습니다.",
+        "구현 난이도와 사용자 임팩트를 균형 있게 고려하세요.",
+        "명확한 커뮤니케이션 없이는 기대치 관리가 어렵습니다.",
+    ],
+}
 
+# ロールプレイ韓国語シナリオ雛形
+ROLEPLAY_SCENARIOS_KO = [
+    {
+        "key": "airport_checkin",
+        "label": "空港：チェックイン",
+        "system_prompt": (
+            "あなたは航空会社の地上職員として振る舞います。会話はすべて韓国語です。"
+            "丁寧で簡潔。ユーザーの韓国語学習を支援しつつ、現実的なダイアログを維持してください。"
+            "一度の返答は短文2～3文程度に留めてください。"
+        ),
+        "opening_user_ko": "안녕하세요. 김포행 항공편 체크인하고 싶어요.",
+    },
+    {
+        "key": "hotel_checkin",
+        "label": "ホテル：チェックイン",
+        "system_prompt": (
+            "あなたはホテルのフロント係です。会話はすべて韓国語で行い、"
+            "チェックイン手続き、本人確認、支払い、館内案内などを適切に進めてください。"
+            "一度の返答は短文2～3文程度に留めてください。"
+        ),
+        "opening_user_ko": "안녕하세요. 오늘 체크인 예약했어요. 이름은 시마다 코헤이입니다.",
+    },
+    {
+        "key": "biz_meeting",
+        "label": "仕事MTG：要件確認",
+        "system_prompt": (
+            "あなたは韓国の取引先の担当者です。会話はすべて韓国語。"
+            "会議の目的・スケジュール・必要資料・次アクションの確認を丁寧に進めてください。"
+            "一度の返答は短文2～3文程度に留めてください。"
+        ),
+        "opening_user_ko": "안녕하세요. 오늘 미팅의 목적과 기대 결과를 먼저 확인하고 싶습니다.",
+    },
+]
 
-[Reply]
-<Your reply in English, 1–3 sentences>
-
-
-[Corrections]
-- 'wrong phrase' → 'better phrase' (short reason)
-- If none, write: None
-
-
-[日本語アドバイス]
-- 学習者向けの短いヒントを1行（日本語）
-"""
-
-
-# ランダム英文出題（難易度を反映）
-SYSTEM_TEMPLATE_CREATE_PROBLEM = """
-Generate exactly **one** self-contained English sentence for shadowing/dictation.
-Target: {level_label} learner.\n{level_style}
-Constraints:
-- Natural in daily/work/social context.
-- ~15 words (±5) for 初級/中級, up to 22–25 for 上級。
-- Provide clear semantics (no unresolved pronouns, no lists, no quotes).
-Return only the sentence.
-"""
-
-
-# 機械採点(WER)を踏まえた評価（LLM採点）
-SYSTEM_TEMPLATE_EVALUATION = """
-あなたは英語学習の専門家です（対象レベル: {level_label}）。
-以下の情報をふまえて、人にわかりやすい**日本語中心**のフィードバックを行ってください。
-
-
-[機械採点の参考値]
-- WER(Word Error Rate): {wer_percent:.1f}%
-
-
-[語のアライン表(参考)]
-{diff_table}
-
-
-[LLMによる問題文]
-{llm_text}
-
-
-[ユーザーの回答]
-{user_text}
-
-
-# 出力フォーマット（Markdownで厳守）
-**総合スコア**: <0–100 点> # WERも勘案。ただし意味が通れば減点を抑える
-**評価理由(日本語)**:
-- 箇条書きで具体的に（語彙・語順・機能語）
-**語彙/文法の指摘(英語)**:
-- 'X' → 'Y' (reason)
-**模範解答(英語)**:
-> 書き換え例を1つ
-**次の練習アドバイス(日本語)**:
-- 改善のための1行アドバイス
-"""
+# 役割プロンプト（モード別、言語別で利用）
+def system_prompt_for(mode: str, lang_code: str) -> str:
+    lname = LANGS.get(lang_code, LANGS[DEFAULT_LANG])["prompt_name"]
+    if mode == ANSWER_MODE_DAILY:
+        return (f"You are a friendly {lname} conversation partner for a Japanese learner. "
+                f"Respond only in {lname}, keep it short and natural.")
+    if mode == ANSWER_MODE_ROLEPLAY:
+        # 個別シナリオで上書きする前提の基本
+        return (f"You are a {lname} roleplay partner. Reply only in {lname}, short and natural.")
+    return f"You are a helpful {lname} tutor."
