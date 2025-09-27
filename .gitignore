@@ -1,12 +1,15 @@
-﻿.venv/
-.env
-.streamlit/secrets.toml
+# Python
 __pycache__/
-*.wav
-*.mp3
-data/
-*.db
+*.pyc
 
-data/
-*.db
+# venv
+.venv/
 
+# Local data
+data/
+
+# Streamlit local secrets
+.streamlit/secrets.toml
+
+# dotenv
+.env
