@@ -134,13 +134,11 @@ def _detect_ffmpeg_exe() -> Optional[str]:
             get_exe = getattr(mod, "get_ffmpeg_exe", None)
             if callable(get_exe):
                 p_obj: Any = get_exe()
-                # p_obj が str か PathLike のときだけ扱う
                 if isinstance(p_obj, str):
                     if os.path.isfile(p_obj):
                         return p_obj
                 else:
                     try:
-                        # PathLike を文字列化（非対応なら例外）
                         path_like = os.fspath(p_obj)  # type: ignore[arg-type]
                         if isinstance(path_like, str) and os.path.isfile(path_like):
                             return path_like

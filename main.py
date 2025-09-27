@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 SpeakStudio (Streamlit)
-- スマホ互換：WAV変換トグル（既定ON）＋ 代替プレーヤー（HTML埋め込み）＋ ダウンロードfallback
-- 自動再生OFF既定＋各発話に「▶️再生」ボタン
+- スマホ互換: <audio> に WAV と MP3 を両方埋め込み（ブラウザが自動選択）
+- gTTS強制 / WAV変換 / 代替プレーヤー（HTML直埋め）をサイドバーで切替
 - スクロール例文・ダークモード可読CSS・サイドバー案内
 """
 
@@ -18,26 +18,43 @@ import speech_recognition as sr
 import constants as ct
 import functions as fn
 
+# ---------- ページ設定 ----------
 st.set_page_config(page_title=ct.APP_NAME, page_icon="🎧", layout="wide")
 
+# ---------- CSS ----------
 st.markdown("""
 <style>
 :root { --radius: 14px; }
+
+/* 共通ボックス */
 .block { border: 1px solid #e5e7eb; padding: 12px 14px; border-radius: var(--radius); background: #ffffff; color: #111; }
 .note  { background: #f7faff; border-color: #cfe3ff; color: #111; }
 .tran  { background: #fff8e6; border-color: #ffd28a; color: #111; }
 small.help { color: #333; }
+
+/* モバイル向けヒント（幅が狭い時だけ表示） */
 .mobile-tip { display:none; margin: 8px 0 12px; padding:10px 12px; border:1px dashed #6aa0ff; border-radius:12px; background:#eef5ff; color:#0b1f3a; }
 @media (max-width: 768px) { .mobile-tip { display:block; } }
-.scroll-list { max-height: 50vh; overflow-y: auto; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; color: #111; }
-@media (prefers-color-scheme: dark) { .block, .note, .tran, .scroll-list { color: #111; background: #fff; border-color: #e5e7eb; } small.help { color: #222; } }
+
+/* 例文のスクロールボックス：30件でも見切れない */
+.scroll-list {
+  max-height: 50vh; overflow-y: auto; padding: 8px 12px;
+  border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; color: #111;
+}
+
+/* ダークテーマ時の読みやすさ確保（白地に黒字を強制） */
+@media (prefers-color-scheme: dark) {
+  .block, .note, .tran, .scroll-list { color: #111; background: #fff; border-color: #e5e7eb; }
+  small.help { color: #222; }
+}
 </style>
 """, unsafe_allow_html=True)
 
+# ---------- サイドバー ----------
 with st.sidebar:
     st.markdown(f"### {ct.APP_NAME}")
 
-    # 言語
+    # 言語選択
     code_list = list(ct.LANGS.keys())
     label_list = [ct.LANGS[c]["label"] for c in code_list]
     lang_idx = st.radio("練習言語", options=range(len(code_list)),
@@ -46,72 +63,126 @@ with st.sidebar:
     lang = code_list[lang_idx]
     st.session_state["lang"] = lang
 
-    # モード
-    mode_map = {"Daily Chat": ct.ANSWER_MODE_DAILY, "Shadowing": ct.ANSWER_MODE_SHADOWING, "Roleplay": ct.ANSWER_MODE_ROLEPLAY}
+    # モード選択
+    mode_map = {
+        "Daily Chat": ct.ANSWER_MODE_DAILY,
+        "Shadowing": ct.ANSWER_MODE_SHADOWING,
+        "Roleplay": ct.ANSWER_MODE_ROLEPLAY
+    }
     mode_label = st.radio("モード", list(mode_map.keys()), index=0)
     mode = mode_map[mode_label]
     st.session_state["mode"] = mode
 
     st.divider()
 
-    # 翻訳・自動再生
+    # 即時訳（韓→日）
     show_trans = st.checkbox("即時訳（韓→日）を表示", value=True)
+
+    # 自動再生（スマホはOFF推奨）
     autoplay = st.checkbox("音声の自動再生（iOSはOFF推奨）", value=False)
     st.session_state["autoplay"] = autoplay
 
-    # 互換性
-    use_alt_player = st.checkbox("代替プレーヤー（HTML直埋め）を使う", value=True)
-    force_gtts = st.checkbox("gTTSを強制（互換性優先）", value=True)
-    force_wav = st.checkbox("WAVに変換して再生（互換性優先・推奨）", value=True)
+    # 互換性オプション
+    use_alt_player = st.checkbox("代替プレーヤー（HTML直埋め）を使う", value=True,
+                                 help="スマホで再生エラーが出る場合はON。")
+    force_gtts = st.checkbox("gTTSを強制（互換性優先）", value=True,
+                             help="Edge-TTSで鳴らない端末向け。速度調整は無効。")
+    force_wav = st.checkbox("WAVに変換して再生（互換性優先・推奨）", value=True,
+                            help="ffmpeg利用。iOS Safari などで安定。")
 
     st.divider()
 
-    # TTS設定
-    prefer_edge = st.checkbox("Edge-TTSを優先する（速度調整可）", value=True and not force_gtts, disabled=force_gtts)
+    # TTS 設定（gTTS強制時は速度/声の選択を無効化）
+    prefer_edge = st.checkbox("Edge-TTSを優先する（速度調整可）",
+                              value=not force_gtts, disabled=force_gtts)
     rate = st.slider("音声速度（％）", min_value=-50, max_value=50, value=0, step=5, disabled=force_gtts)
     voices = ct.LANGS[lang].get("edge_voices", [])
     edge_voice = st.selectbox("Edge-TTSの声", voices, index=0 if voices else None, disabled=force_gtts) if voices else None
 
     st.session_state["tts_cfg"] = {
-        "prefer_edge": prefer_edge, "rate": rate, "edge_voice": edge_voice,
-        "use_alt_player": use_alt_player, "force_gtts": force_gtts, "force_wav": force_wav
+        "prefer_edge": prefer_edge,
+        "rate": rate,
+        "edge_voice": edge_voice,
+        "use_alt_player": use_alt_player,
+        "force_gtts": force_gtts,
+        "force_wav": force_wav
     }
 
     st.divider()
-    st.markdown('<div class="block note"><small class="help">スマホで再生できない時は「WAVに変換」「gTTSを強制」「代替プレーヤー」をONに。</small></div>', unsafe_allow_html=True)
+    st.markdown('<div class="block note"><small class="help">鳴らない時は「WAVに変換」「gTTSを強制」「代替プレーヤー」をONに。</small></div>', unsafe_allow_html=True)
 
+# ---------- ヘッダー ----------
 st.markdown(f"## {ct.APP_NAME}")
 st.markdown('<div class="mobile-tip">📱 スマホの方へ：左上の<strong>≡（メニュー）</strong>でサイドバーが開きます。</div>', unsafe_allow_html=True)
 st.markdown('<div class="block note">英語 / 韓国語の会話練習・シャドーイング・ロールプレイ</div>', unsafe_allow_html=True)
 
 # ---------- 共通ヘルパ ----------
-def _render_audio(data: bytes, mime: str, file_stub: str, alt_player: bool):
-    filename = f"{file_stub}.{'wav' if mime=='audio/wav' else 'mp3'}"
-    if alt_player:
-        b64 = base64.b64encode(data).decode("ascii")
-        html = f'<audio controls preload="none" playsinline><source src="data:{mime};base64,{b64}" type="{mime}"></audio>'
+def synth_and_player(text: str, lang_code: str, file_stub: str = "speech"):
+    """
+    1クリックで MP3 と WAV を両方用意し、<audio> に複数 <source> を埋め込む。
+    ブラウザは再生可能な方を自動選択。
+    """
+    cfg = st.session_state.get(
+        "tts_cfg",
+        {"prefer_edge": False, "rate": 0, "edge_voice": None,
+         "use_alt_player": True, "force_gtts": True, "force_wav": True}
+    )
+
+    # 1) MP3 を生成（gTTS強制可）
+    mp3_bytes, mp3_mime = fn.tts_synthesize(
+        text, lang_code=lang_code,
+        rate_pct=cfg["rate"], prefer_edge=cfg["prefer_edge"],
+        edge_voice=cfg["edge_voice"], force_wav=False, force_gtts=cfg["force_gtts"]
+    )
+
+    # 2) WAV を生成（ffmpeg が無い場合は mp3 のまま返る可能性あり）
+    wav_bytes, wav_mime = fn.tts_synthesize(
+        text, lang_code=lang_code,
+        rate_pct=cfg["rate"], prefer_edge=cfg["prefer_edge"],
+        edge_voice=cfg["edge_voice"], force_wav=cfg["force_wav"], force_gtts=cfg["force_gtts"]
+    )
+
+    # 3) ソースを組み立て（WAV優先→MP3）
+    sources: list[tuple[str, bytes]] = []
+    if wav_mime == "audio/wav" and isinstance(wav_bytes, (bytes, bytearray)) and len(wav_bytes) > 44:
+        sources.append((wav_mime, wav_bytes))
+    if isinstance(mp3_bytes, (bytes, bytearray)) and len(mp3_bytes) > 0:
+        sources.append((mp3_mime, mp3_bytes))
+
+    if not sources:
+        st.error("音声の生成に失敗しました。サイドバーで「gTTSを強制」「WAVに変換」をONにして再試行してください。")
+        return
+
+    # 4) レンダリング
+    if cfg.get("use_alt_player", True):
+        # HTML <audio> に複数 <source> を埋め込み（playsinline で iOS 対策）
+        html = '<audio controls preload="metadata" playsinline>'
+        for mime, data in sources:
+            b64 = base64.b64encode(data).decode("ascii")
+            html += f'<source src="data:{mime};base64,{b64}" type="{mime}"/>'
+        html += "</audio>"
         st.markdown(html, unsafe_allow_html=True)
-        st.download_button("⬇️ 音声を保存（再生できない場合）", data, file_name=filename, mime=mime, use_container_width=True)
+
+        # ダウンロード（先頭ソース）
+        top_mime, top_data = sources[0]
+        ext = "wav" if top_mime == "audio/wav" else "mp3"
+        st.download_button(
+            "⬇️ 音声を保存（再生できない場合）",
+            top_data, file_name=f"{file_stub}.{ext}", mime=top_mime,
+            use_container_width=True
+        )
     else:
+        # Streamlit のネイティブプレーヤーは単一フォーマットしか渡せないので WAV を優先
+        mime, data = sources[0]
         st.audio(data, format=mime)
 
-def synth_and_player(text: str, lang_code: str, file_stub: str = "speech"):
-    cfg = st.session_state.get("tts_cfg", {"prefer_edge": True, "rate": 0, "edge_voice": None,
-                                           "use_alt_player": True, "force_gtts": False, "force_wav": True})
-    data, mime = fn.tts_synthesize(
-        text, lang_code=lang_code,
-        rate_pct=cfg["rate"], prefer_edge=cfg["prefer_edge"], edge_voice=cfg["edge_voice"],
-        force_wav=cfg["force_wav"], force_gtts=cfg["force_gtts"]
-    )
-    _render_audio(data, mime, file_stub, cfg["use_alt_player"])
-
 def show_translation_if_needed(source_text_ko: str):
-    if lang == "ko" and show_trans and source_text_ko.strip():
+    if st.session_state.get("lang") == "ko" and show_trans and source_text_ko.strip():
         jp = fn.translate_text(source_text_ko, target_lang_label="Japanese")
         st.markdown('<div class="block tran">【日本語訳】<br>' + jp + '</div>', unsafe_allow_html=True)
 
 # ========== 1) Daily Chat ==========
-if mode == ct.ANSWER_MODE_DAILY:
+if st.session_state["mode"] == ct.ANSWER_MODE_DAILY:
     st.subheader("Daily Chat（フリートーク）")
     st.markdown('<div class="block note">スマホで音が出ない場合はサイドバーの互換設定をONにしてください。</div>', unsafe_allow_html=True)
 
@@ -122,10 +193,10 @@ if mode == ct.ANSWER_MODE_DAILY:
         with st.chat_message(who):
             st.write(text)
             if who == "assistant":
-                if lang == "ko":
+                if st.session_state["lang"] == "ko":
                     show_translation_if_needed(text)
                 if st.button("▶️ 再生", key=f"play_hist_{i}"):
-                    synth_and_player(text, lang, file_stub=f"reply_{i}")
+                    synth_and_player(text, st.session_state["lang"], file_stub=f"reply_{i}")
 
     user_text = st.chat_input("メッセージを入力（日本語/英語/韓国語 OK）")
     if user_text:
@@ -133,23 +204,23 @@ if mode == ct.ANSWER_MODE_DAILY:
         with st.chat_message("user"):
             st.write(user_text)
 
-        system_prompt = ct.system_prompt_for(ct.ANSWER_MODE_DAILY, lang)
+        system_prompt = ct.system_prompt_for(ct.ANSWER_MODE_DAILY, st.session_state["lang"])
         reply = fn.chat_once(system_prompt, user_text, model=ct.OPENAI_MODEL)
 
         st.session_state["chat"].append(("assistant", reply))
         with st.chat_message("assistant"):
             st.write(reply)
-            if lang == "ko":
+            if st.session_state["lang"] == "ko":
                 show_translation_if_needed(reply)
 
             if st.session_state.get("autoplay", False):
-                synth_and_player(reply, lang, file_stub="reply_new")
+                synth_and_player(reply, st.session_state["lang"], file_stub="reply_new")
             else:
                 if st.button("▶️ 再生", key=f"play_new_{len(st.session_state['chat'])}"):
-                    synth_and_player(reply, lang, file_stub="reply_new")
+                    synth_and_player(reply, st.session_state["lang"], file_stub="reply_new")
 
 # ========== 2) Shadowing ==========
-elif mode == ct.ANSWER_MODE_SHADOWING:
+elif st.session_state["mode"] == ct.ANSWER_MODE_SHADOWING:
     st.subheader("Shadowing（音読・復唱）")
 
     c1, c2, c3 = st.columns(3)
@@ -160,7 +231,7 @@ elif mode == ct.ANSWER_MODE_SHADOWING:
     with c3:
         st.write("　")
 
-    sents = ct.SHADOWING_CORPUS_KO[level] if lang == "ko" else ct.SHADOWING_CORPUS_EN[level]
+    sents = ct.SHADOWING_CORPUS_KO[level] if st.session_state["lang"] == "ko" else ct.SHADOWING_CORPUS_EN[level]
     st.markdown("#### 例文（30件）")
     st.markdown("<div class='scroll-list'><ol>" + "".join(f"<li>{s}</li>" for s in sents) + "</ol></div>", unsafe_allow_html=True)
 
@@ -174,7 +245,7 @@ elif mode == ct.ANSWER_MODE_SHADOWING:
     b1, b2, _ = st.columns(3)
     with b1:
         if st.button("▶️ 合成音声を再生"):
-            synth_and_player(target, lang, file_stub=f"shadow_{level}_{idx}")
+            synth_and_player(target, st.session_state["lang"], file_stub=f"shadow_{level}_{idx}")
     with b2:
         mic = mic_recorder(start_prompt="🎙️ 録音開始", stop_prompt="⏹️ 停止", just_once=True)
 
@@ -184,7 +255,7 @@ elif mode == ct.ANSWER_MODE_SHADOWING:
         try:
             with sr.AudioFile(io.BytesIO(wav_bytes)) as source:
                 audio = recognizer.record(source)
-            transcribed = fn.stt_recognize_from_audio(audio, lang_code=lang)
+            transcribed = fn.stt_recognize_from_audio(audio, lang_code=st.session_state["lang"])
         except Exception:
             transcribed = ""
 
@@ -197,7 +268,7 @@ elif mode == ct.ANSWER_MODE_SHADOWING:
         score = int(ratio * 100)
         st.markdown(f"**スコア：{score} / 100**")
 
-        if lang == "ko":
+        if st.session_state["lang"] == "ko":
             st.markdown("##### 意味（参考）")
             show_translation_if_needed(target)
 
@@ -205,7 +276,7 @@ elif mode == ct.ANSWER_MODE_SHADOWING:
             st.info(f"同じ文を {repeat_n} 回練習してみましょう。")
 
 # ========== 3) Roleplay ==========
-elif mode == ct.ANSWER_MODE_ROLEPLAY:
+elif st.session_state["mode"] == ct.ANSWER_MODE_ROLEPLAY:
     st.subheader("Roleplay（韓国語シナリオ）")
 
     labels = [x["label"] for x in ct.ROLEPLAY_SCENARIOS_KO]
@@ -247,3 +318,4 @@ elif mode == ct.ANSWER_MODE_ROLEPLAY:
             else:
                 if st.button("▶️ 再生", key=f"play_rp_new_{len(st.session_state[key])}"):
                     synth_and_player(reply, "ko", file_stub=f"rp_{scenario['key']}_new")
+
