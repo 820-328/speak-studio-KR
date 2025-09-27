@@ -43,7 +43,7 @@ def _make_llm(model: Optional[str] = None, temperature: float = 0.3):
 def _content_to_text(content: Union[str, List[Dict[str, Any]], Any]) -> str:
     """
     LangChainの AIMessage.content は str か list[dict(type=..., ...)] の場合がある。
-    Pylanceの型警告を避けつつ安全に文字列へ。
+    型警告を避けつつ安全に文字列へ。
     """
     if isinstance(content, str):
         return content
@@ -51,18 +51,15 @@ def _content_to_text(content: Union[str, List[Dict[str, Any]], Any]) -> str:
         texts: List[str] = []
         for part in content:
             if isinstance(part, dict):
-                # OpenAIのツール出力等を想定。type=="text" を優先的に拾う。
                 t = part.get("text")
                 if isinstance(t, str):
                     texts.append(t)
                 else:
-                    # 念のため他タイプも文字列化
                     try:
                         texts.append(str(t) if t is not None else "")
                     except Exception:
                         pass
         return "\n".join([t for t in texts if t]).strip()
-    # 不明タイプは素直に文字列化
     try:
         return str(content)
     except Exception:
@@ -138,8 +135,11 @@ async def _edge_tts_bytes_async(text: str, voice: str, rate_pct: int) -> bytes:
     communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate)  # type: ignore[name-defined]
     out = io.BytesIO()
     async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            out.write(chunk["data"])
+        # chunk は TypedDict だが、非必須キーに直接アクセスすると型警告になるためガードする
+        if isinstance(chunk, dict) and chunk.get("type") == "audio":
+            data = chunk.get("data", b"")
+            if isinstance(data, (bytes, bytearray)):
+                out.write(data)
     return out.getvalue()
 
 
