@@ -3,7 +3,8 @@
 SpeakStudio functions:
 - LLM / 翻訳
 - STT（SpeechRecognition）
-- TTS（Edge-TTS優先、無ければgTTS）: MP3=audio/mpeg、無音/短尺ガード
+- TTS（Edge-TTS優先、無ければgTTS）
+- MP3→WAV 変換（ffmpeg：imageio-ffmpeg か システム ffmpeg を自動検出）
 - テキスト正規化
 """
 
@@ -13,6 +14,10 @@ import os
 import re
 import unicodedata
 import asyncio
+import subprocess
+import importlib
+import importlib.util
+import shutil
 from typing import Optional, List, Dict, Any, Union, Tuple
 
 import constants as ct
@@ -108,11 +113,53 @@ def stt_recognize_from_audio(audio_data, lang_code: str) -> str:
         return ""
 
 
+# ---------- ffmpeg 検出 ----------
+def _detect_ffmpeg_exe() -> Optional[str]:
+    """
+    優先順:
+    1) 環境変数 FFMPEG_PATH
+    2) imageio-ffmpeg があればその静的 ffmpeg
+    3) システム PATH 上の ffmpeg / ffmpeg.exe
+    """
+    # 1) env
+    env_p = os.environ.get("FFMPEG_PATH")
+    if isinstance(env_p, str) and env_p and os.path.isfile(env_p):
+        return env_p
+
+    # 2) imageio-ffmpeg（動的 import）
+    try:
+        spec = importlib.util.find_spec("imageio_ffmpeg")
+        if spec is not None:
+            mod = importlib.import_module("imageio_ffmpeg")
+            get_exe = getattr(mod, "get_ffmpeg_exe", None)
+            if callable(get_exe):
+                p_obj: Any = get_exe()
+                # p_obj が str か PathLike のときだけ扱う
+                if isinstance(p_obj, str):
+                    if os.path.isfile(p_obj):
+                        return p_obj
+                else:
+                    try:
+                        # PathLike を文字列化（非対応なら例外）
+                        path_like = os.fspath(p_obj)  # type: ignore[arg-type]
+                        if isinstance(path_like, str) and os.path.isfile(path_like):
+                            return path_like
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    # 3) system ffmpeg
+    p = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+    return p if isinstance(p, str) else None
+
+
+_FFMPEG_PATH: Optional[str] = _detect_ffmpeg_exe()
+
+
 # ---------- TTS ----------
 async def _edge_tts_bytes_async(text: str, voice: str, rate_pct: int) -> bytes:
-    """
-    Edge-TTS で音声生成（MP3相当）。
-    """
+    """Edge-TTS で音声生成（MP3相当）。"""
     rate = f"{rate_pct:+d}%"
     communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate)  # type: ignore[name-defined]
     out = io.BytesIO()
@@ -133,21 +180,45 @@ def _gtts_bytes(text: str, lang_code: str) -> bytes:
     return buf.read()
 
 
+def _mp3_to_wav_bytes(mp3_bytes: bytes, sample_rate: int = 16000, channels: int = 1) -> Optional[bytes]:
+    """
+    MP3 -> WAV(PCM16) に変換。ffmpeg が使えない場合は None を返す。
+    iOS Safari などの互換性向上用。
+    """
+    if not _FFMPEG_PATH:
+        return None
+    try:
+        cmd = [
+            _FFMPEG_PATH,
+            "-nostdin", "-hide_banner", "-loglevel", "error",
+            "-i", "pipe:0",
+            "-acodec", "pcm_s16le", "-ac", str(channels), "-ar", str(sample_rate),
+            "-f", "wav", "pipe:1",
+        ]
+        proc = subprocess.run(cmd, input=mp3_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        return proc.stdout if proc.returncode == 0 and len(proc.stdout) > 44 else None
+    except Exception:
+        return None
+
+
 def tts_synthesize(
     text: str,
     lang_code: str,
     rate_pct: int = 0,
     prefer_edge: bool = True,
     edge_voice: Optional[str] = None,
-    force_wav: bool = False,          # 互換のため残置（現状MP3固定）
-    force_gtts: bool = False,         # ← 追加：互換性優先でgTTSのみを使用
+    force_wav: bool = False,
+    force_gtts: bool = False,
 ) -> Tuple[bytes, str]:
     """
     音声合成（bytes, mime）を返す
     - Edge-TTS優先（audio/mpeg）
-    - 無音/短尺(1KB未満)や例外時は gTTS に自動フォールバック（audio/mpeg）
-    - force_gtts=True なら常に gTTS を使用
+    - 失敗/短尺(1KB未満)時は gTTS に自動フォールバック（audio/mpeg）
+    - force_gtts=True なら常に gTTS
+    - force_wav=True なら最終的に WAV へ変換（可能なら）
     """
+    audio_mp3: Optional[bytes] = None
+
     if not force_gtts and prefer_edge and _HAS_EDGE_TTS:
         voices = get_lang_conf(lang_code).get("edge_voices", [])
         voice = edge_voice or (voices[0] if voices else None)
@@ -155,13 +226,19 @@ def tts_synthesize(
             try:
                 b = asyncio.run(_edge_tts_bytes_async(text, voice, rate_pct))
                 if b and len(b) >= 1024:
-                    return b, "audio/mpeg"
+                    audio_mp3 = b
             except Exception:
-                pass  # フォールバックへ
+                audio_mp3 = None
 
-    # gTTS（確実にMP3生成）
-    b = _gtts_bytes(text, lang_code)
-    return b, "audio/mpeg"
+    if audio_mp3 is None:
+        audio_mp3 = _gtts_bytes(text, lang_code)
+
+    if force_wav:
+        wav = _mp3_to_wav_bytes(audio_mp3)
+        if wav:
+            return wav, "audio/wav"
+
+    return audio_mp3, "audio/mpeg"
 
 
 # ---------- 正規化（比較用） ----------

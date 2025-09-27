@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 SpeakStudio (Streamlit)
-- モバイル音声再生を強化：代替プレーヤー（HTML直埋め）＋ gTTS強制トグル＋ダウンロードfallback
+- スマホ互換：WAV変換トグル（既定ON）＋ 代替プレーヤー（HTML埋め込み）＋ ダウンロードfallback
 - 自動再生OFF既定＋各発話に「▶️再生」ボタン
 - スクロール例文・ダークモード可読CSS・サイドバー案内
 """
@@ -18,43 +18,26 @@ import speech_recognition as sr
 import constants as ct
 import functions as fn
 
-# ---------- ページ設定 ----------
 st.set_page_config(page_title=ct.APP_NAME, page_icon="🎧", layout="wide")
 
-# ---------- CSS ----------
 st.markdown("""
 <style>
 :root { --radius: 14px; }
-
-/* 共通ボックス */
 .block { border: 1px solid #e5e7eb; padding: 12px 14px; border-radius: var(--radius); background: #ffffff; color: #111; }
 .note  { background: #f7faff; border-color: #cfe3ff; color: #111; }
 .tran  { background: #fff8e6; border-color: #ffd28a; color: #111; }
 small.help { color: #333; }
-
-/* モバイル向けヒント（幅が狭い時だけ表示） */
 .mobile-tip { display:none; margin: 8px 0 12px; padding:10px 12px; border:1px dashed #6aa0ff; border-radius:12px; background:#eef5ff; color:#0b1f3a; }
 @media (max-width: 768px) { .mobile-tip { display:block; } }
-
-/* 例文のスクロールボックス：30件でも見切れない */
-.scroll-list {
-  max-height: 50vh; overflow-y: auto; padding: 8px 12px;
-  border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; color: #111;
-}
-
-/* ダークテーマ時の読みやすさ確保 */
-@media (prefers-color-scheme: dark) {
-  .block, .note, .tran, .scroll-list { color: #111; background: #fff; border-color: #e5e7eb; }
-  small.help { color: #222; }
-}
+.scroll-list { max-height: 50vh; overflow-y: auto; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; color: #111; }
+@media (prefers-color-scheme: dark) { .block, .note, .tran, .scroll-list { color: #111; background: #fff; border-color: #e5e7eb; } small.help { color: #222; } }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- サイドバー ----------
 with st.sidebar:
     st.markdown(f"### {ct.APP_NAME}")
 
-    # 言語選択
+    # 言語
     code_list = list(ct.LANGS.keys())
     label_list = [ct.LANGS[c]["label"] for c in code_list]
     lang_idx = st.radio("練習言語", options=range(len(code_list)),
@@ -63,7 +46,7 @@ with st.sidebar:
     lang = code_list[lang_idx]
     st.session_state["lang"] = lang
 
-    # モード選択
+    # モード
     mode_map = {"Daily Chat": ct.ANSWER_MODE_DAILY, "Shadowing": ct.ANSWER_MODE_SHADOWING, "Roleplay": ct.ANSWER_MODE_ROLEPLAY}
     mode_label = st.radio("モード", list(mode_map.keys()), index=0)
     mode = mode_map[mode_label]
@@ -71,59 +54,56 @@ with st.sidebar:
 
     st.divider()
 
-    # 即時訳（韓→日）
+    # 翻訳・自動再生
     show_trans = st.checkbox("即時訳（韓→日）を表示", value=True)
-
-    # 自動再生（スマホはOFF推奨）
     autoplay = st.checkbox("音声の自動再生（iOSはOFF推奨）", value=False)
     st.session_state["autoplay"] = autoplay
 
-    # 互換性設定
-    use_alt_player = st.checkbox("代替プレーヤー（HTML直埋め）を使う", value=True,
-                                 help="スマホで再生エラーが出る場合はONにしてください。")
-    force_gtts = st.checkbox("gTTSを強制（互換性優先）", value=True,
-                             help="Edge-TTSで鳴らない端末向け。速度調整は無効になります。")
+    # 互換性
+    use_alt_player = st.checkbox("代替プレーヤー（HTML直埋め）を使う", value=True)
+    force_gtts = st.checkbox("gTTSを強制（互換性優先）", value=True)
+    force_wav = st.checkbox("WAVに変換して再生（互換性優先・推奨）", value=True)
 
     st.divider()
 
-    # TTS 設定
+    # TTS設定
     prefer_edge = st.checkbox("Edge-TTSを優先する（速度調整可）", value=True and not force_gtts, disabled=force_gtts)
     rate = st.slider("音声速度（％）", min_value=-50, max_value=50, value=0, step=5, disabled=force_gtts)
     voices = ct.LANGS[lang].get("edge_voices", [])
     edge_voice = st.selectbox("Edge-TTSの声", voices, index=0 if voices else None, disabled=force_gtts) if voices else None
+
     st.session_state["tts_cfg"] = {
         "prefer_edge": prefer_edge, "rate": rate, "edge_voice": edge_voice,
-        "use_alt_player": use_alt_player, "force_gtts": force_gtts
+        "use_alt_player": use_alt_player, "force_gtts": force_gtts, "force_wav": force_wav
     }
 
     st.divider()
-    st.markdown('<div class="block note"><small class="help">再生できない場合は「代替プレーヤーを使う」「gTTSを強制」をONにしてください。</small></div>', unsafe_allow_html=True)
+    st.markdown('<div class="block note"><small class="help">スマホで再生できない時は「WAVに変換」「gTTSを強制」「代替プレーヤー」をONに。</small></div>', unsafe_allow_html=True)
 
-# ---------- ヘッダー ----------
 st.markdown(f"## {ct.APP_NAME}")
-st.markdown('<div class="mobile-tip">📱 スマホの方へ：左上の<strong>≡（メニュー）</strong>をタップするとサイドバーが開きます。</div>', unsafe_allow_html=True)
+st.markdown('<div class="mobile-tip">📱 スマホの方へ：左上の<strong>≡（メニュー）</strong>でサイドバーが開きます。</div>', unsafe_allow_html=True)
 st.markdown('<div class="block note">英語 / 韓国語の会話練習・シャドーイング・ロールプレイ</div>', unsafe_allow_html=True)
 
 # ---------- 共通ヘルパ ----------
-def synth_and_player(text: str, lang_code: str, file_stub: str = "speech"):
-    cfg = st.session_state.get("tts_cfg", {"prefer_edge": True, "rate": 0, "edge_voice": None,
-                                           "use_alt_player": True, "force_gtts": False})
-    data, mime = fn.tts_synthesize(
-        text, lang_code=lang_code,
-        rate_pct=cfg["rate"], prefer_edge=cfg["prefer_edge"],
-        edge_voice=cfg["edge_voice"], force_gtts=cfg["force_gtts"]
-    )
-
-    filename = f"{file_stub}.mp3"
-    if cfg["use_alt_player"]:
-        # HTML直埋めの代替プレーヤー
+def _render_audio(data: bytes, mime: str, file_stub: str, alt_player: bool):
+    filename = f"{file_stub}.{'wav' if mime=='audio/wav' else 'mp3'}"
+    if alt_player:
         b64 = base64.b64encode(data).decode("ascii")
-        html = f'<audio controls preload="auto" src="data:{mime};base64,{b64}"></audio>'
+        html = f'<audio controls preload="none" playsinline><source src="data:{mime};base64,{b64}" type="{mime}"></audio>'
         st.markdown(html, unsafe_allow_html=True)
-        # 再生できない場合のダウンロードfallback
         st.download_button("⬇️ 音声を保存（再生できない場合）", data, file_name=filename, mime=mime, use_container_width=True)
     else:
         st.audio(data, format=mime)
+
+def synth_and_player(text: str, lang_code: str, file_stub: str = "speech"):
+    cfg = st.session_state.get("tts_cfg", {"prefer_edge": True, "rate": 0, "edge_voice": None,
+                                           "use_alt_player": True, "force_gtts": False, "force_wav": True})
+    data, mime = fn.tts_synthesize(
+        text, lang_code=lang_code,
+        rate_pct=cfg["rate"], prefer_edge=cfg["prefer_edge"], edge_voice=cfg["edge_voice"],
+        force_wav=cfg["force_wav"], force_gtts=cfg["force_gtts"]
+    )
+    _render_audio(data, mime, file_stub, cfg["use_alt_player"])
 
 def show_translation_if_needed(source_text_ko: str):
     if lang == "ko" and show_trans and source_text_ko.strip():
@@ -133,7 +113,7 @@ def show_translation_if_needed(source_text_ko: str):
 # ========== 1) Daily Chat ==========
 if mode == ct.ANSWER_MODE_DAILY:
     st.subheader("Daily Chat（フリートーク）")
-    st.markdown('<div class="block note">選択言語のみで応答します。スマホで音が出ない場合はサイドバーの「代替プレーヤー」または「gTTSを強制」をONにしてください。</div>', unsafe_allow_html=True)
+    st.markdown('<div class="block note">スマホで音が出ない場合はサイドバーの互換設定をONにしてください。</div>', unsafe_allow_html=True)
 
     if "chat" not in st.session_state:
         st.session_state["chat"] = []
