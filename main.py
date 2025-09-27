@@ -183,7 +183,7 @@ def synth_and_player(text: str, lang_code: str, file_stub: str = "speech"):
 def record_audio_webrtc_once() -> bytes | None:
     try:
         from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
-        import av
+        import av  # noqa: F401  # 実行時に必要
     except Exception:
         st.warning("WebRTC録音を使うには 'streamlit-webrtc' と 'av' が必要です（requirements.txt に追加）。")
         return None
@@ -208,21 +208,44 @@ def record_audio_webrtc_once() -> bytes | None:
     with col_b:
         stop = st.button("⏹️ 録音を停止して保存", use_container_width=True)
 
-    if ctx.state.playing:
-        # 受信フレームを随時追記
-        frames = ctx.audio_receiver.get_frames(timeout=1)
+    # ---- ここを堅牢化：audio_receiver が None の可能性をローカル変数でガード ----
+    receiver = getattr(ctx, "audio_receiver", None) if ctx else None
+    if ctx and ctx.state.playing and receiver is not None:
+        try:
+            frames = receiver.get_frames(timeout=1) or []
+        except Exception:
+            frames = []
         for f in frames:
-            arr = f.to_ndarray(format="s16")  # 16bit PCM
-            # arr の shape は実装により (channels, samples) or (samples, channels)
+            # PyAV AudioFrame → ndarray（channels x samples or samples x channels）
+            arr = f.to_ndarray()  # 引数formatは使わず、後段でint16化
+            # dtype を int16 へ（floatの場合はスケール）
+            if arr.dtype != np.int16:
+                try:
+                    if np.issubdtype(arr.dtype, np.floating):
+                        arr = (np.clip(arr, -1.0, 1.0) * 32767.0).astype(np.int16)
+                    else:
+                        arr = arr.astype(np.int16, copy=False)
+                except Exception:
+                    arr = arr.astype(np.int16, copy=False)
+
+            # mono 化（どちらの次元がチャンネルでも拾えるよう冗長に）
             if arr.ndim == 2:
-                if arr.shape[0] < arr.shape[1]:  # (channels, samples)
+                # 典型は (channels, samples)
+                if arr.shape[0] <= arr.shape[1]:
                     mono = arr[0, :]
                 else:  # (samples, channels)
                     mono = arr[:, 0]
             else:
                 mono = arr
+
             st.session_state["webrtc_buf"].append(mono.tobytes())
-            st.session_state["webrtc_rate"] = int(getattr(f, "sample_rate", 48000))
+            # サンプルレート取得（無ければ既定 48kHz）
+            try:
+                sr_frame = int(getattr(f, "sample_rate", 48000))
+                if sr_frame > 0:
+                    st.session_state["webrtc_rate"] = sr_frame
+            except Exception:
+                pass
 
     if stop and st.session_state["webrtc_buf"]:
         # WAV にまとめる
